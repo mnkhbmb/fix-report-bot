@@ -169,6 +169,43 @@ async def fix_cmd(interaction: discord.Interaction, rep_id: str, notes: str = ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  /return  — Зассан зүйлийг салбарт буцаах
+# ═══════════════════════════════════════════════════════════════════════════════
+@client.tree.command(name="return", description="Зассан зүйлийг салбарт буцаасныг тэмдэглэх")
+@app_commands.describe(rep_id="REP ID (жш: REP-0003)")
+async def return_cmd(interaction: discord.Interaction, rep_id: str):
+    if not check_channel(interaction):
+        return await interaction.response.send_message(
+            f"❌ **#{CHANNEL_NAME}** channel дотор ашиглана уу.", ephemeral=True)
+
+    await interaction.response.defer()
+    result = client.sheets.mark_returned(rep_id.upper(), returned_by=str(interaction.user))
+
+    if result is None:
+        return await interaction.followup.send(
+            f"❌ **{rep_id}** Fixed tab-аас олдсонгүй. Эхлээд `/fix` хийсэн эсэхийг шалгана уу.",
+            ephemeral=True)
+
+    if result.get("already_returned"):
+        return await interaction.followup.send(
+            f"⚠️ **{rep_id.upper()}** аль хэдийн буцаасан байна.\n"
+            f"Буцаасан: **{result['ret_by']}** · {result['ret_date']}",
+            ephemeral=True)
+
+    embed = discord.Embed(
+        title="📤 Салбарт буцаалаа",
+        description=f"`{rep_id.upper()}` зассан зүйл салбарт буцаагдлаа.",
+        color=0x1ABC9C
+    )
+    embed.add_field(name="📦 Зүйл", value=f"{result['qty']}ш {result['item']}", inline=True)
+    embed.add_field(name="🏢 Салбар", value=result["branch"], inline=True)
+    embed.add_field(name="📦 Илгээлт", value=f"`{result['shp_id']}`", inline=True)
+    embed.add_field(name="🔧 Зассан", value=f"{result['fix_by']} · {result['fix_date']}", inline=False)
+    embed.add_field(name="📤 Буцаасан", value=f"{result['ret_by']} · {result['ret_date']}", inline=False)
+    await interaction.followup.send(embed=embed)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  /status  — SHP эсвэл REP статус шалгах
 # ═══════════════════════════════════════════════════════════════════════════════
 @client.tree.command(name="status", description="Илгээлт (SHP) эсвэл засвар (REP) статус шалгах")
@@ -206,23 +243,112 @@ async def status_cmd(interaction: discord.Interaction, id: str):
         if result is None:
             return await interaction.followup.send(f"❌ **{id_upper}** олдсонгүй.", ephemeral=True)
 
-        location_label = "Fixed tab (дууссан)" if result["location"] == "fixed" else "Repairs tab (засварлаж байна)"
+        loc = result["location"]
+        loc_label = {
+            "repair":   "Repairs tab (засварлаж байна)",
+            "fixed":    "Fixed tab (дууссан)",
+            "returned": "Fixed tab (салбарт буцаасан)"
+        }.get(loc, loc)
+        loc_emoji = {"repair": "⏳", "fixed": "✅", "returned": "📤"}.get(loc, "❓")
+        loc_color = {"repair": 0xF39C12, "fixed": 0x2ECC71, "returned": 0x1ABC9C}.get(loc, 0x95A5A6)
+
         embed = discord.Embed(
-            title=f"{'✅' if result['location']=='fixed' else '⏳'} Засварын статус — {id_upper}",
-            color=0x2ECC71 if result["location"] == "fixed" else 0xF39C12
+            title=f"{loc_emoji} Засварын статус — {id_upper}",
+            color=loc_color
         )
         embed.add_field(name="📦 Зүйл", value=f"{result['qty']}ш {result['item']}", inline=True)
         embed.add_field(name="🏢 Салбар", value=result["branch"], inline=True)
-        embed.add_field(name="📊 Байршил", value=location_label, inline=True)
+        embed.add_field(name="📊 Байршил", value=loc_label, inline=True)
         embed.add_field(name="📦 Илгээлт", value=f"`{result['shp_id']}`", inline=True)
         embed.add_field(name="📊 Статус", value=result["status"], inline=True)
         if result.get("notes"):
             embed.add_field(name="📋 Тэмдэглэл", value=result["notes"], inline=False)
+        if loc == "returned":
+            embed.add_field(name="📤 Буцаасан",
+                            value=f"{result['ret_by']} · {result['ret_date']}", inline=False)
     else:
         return await interaction.followup.send(
             "❌ SHP-XXXX эсвэл REP-XXXX форматаар оруулна уу.", ephemeral=True)
 
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  /aguulakh, /stock_add, /swap  — Салбарын агуулах
+# ═══════════════════════════════════════════════════════════════════════════════
+@client.tree.command(name="aguulakh", description="Энэ салбарын агуулах дахь зүйлсийн жагсаалт")
+async def aguulakh_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    branch = interaction.channel.name
+    items = client.sheets.get_aguulakh(branch)
+
+    embed = discord.Embed(
+        title=f"📦 Агуулах — {branch}",
+        color=0x3498DB
+    )
+    if not items:
+        embed.description = "_Хоосон. `/stock_add` командаар зүйл нэмнэ үү._"
+    else:
+        lines = "\n".join(
+            f"• **{it['item']}** — `{it['qty']}ш`"
+            + (f"  _({it['notes']})_" if it["notes"] else "")
+            for it in items
+        )
+        embed.description = lines
+        embed.set_footer(text=f"Нийт {len(items)} төрөл")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+@client.tree.command(name="stock_add", description="Агуулахад зүйл нэмэх (эсвэл хасах)")
+@app_commands.describe(
+    item="Зүйлийн нэр (жш: mouse, keyboard, чихэвч)",
+    qty="Тоо (хасах бол сөрөг тоо)",
+    notes="Тэмдэглэл (заавал биш)"
+)
+async def stock_add_cmd(interaction: discord.Interaction, item: str, qty: int, notes: str = ""):
+    await interaction.response.defer()
+    branch = interaction.channel.name
+    result = client.sheets.adjust_stock(branch, item, qty, notes)
+
+    action = "нэмэгдэв" if qty >= 0 else "хасагдав"
+    embed = discord.Embed(
+        title=f"📦 Агуулах шинэчлэгдэв — {branch}",
+        description=(
+            f"**{item}** {abs(qty)}ш {action}.\n"
+            f"Өмнө: `{result['old_qty']}ш` → Одоо: `{result['new_qty']}ш`"
+            + ("\n_✨ Шинэ зүйл үүсгэв_" if result["created"] else "")
+        ),
+        color=0x2ECC71 if qty >= 0 else 0xE67E22
+    )
+    if notes:
+        embed.add_field(name="📋 Тэмдэглэл", value=notes, inline=False)
+    embed.set_footer(text=f"Бүртгэсэн: {interaction.user}")
+    await interaction.followup.send(embed=embed)
+
+
+@client.tree.command(name="swap", description="Эвдэрсэн зүйлийг агуулахаас солих")
+@app_commands.describe(
+    item="Зүйлийн нэр",
+    qty="Хэдэн ширхэг солих",
+    reason="Шалтгаан (жш: эвдэрсэн, ажиллахгүй)"
+)
+async def swap_cmd(interaction: discord.Interaction, item: str, qty: int, reason: str = "эвдэрсэн"):
+    await interaction.response.defer()
+    if qty <= 0:
+        return await interaction.followup.send("❌ Тоо эерэг байх ёстой.", ephemeral=True)
+
+    branch = interaction.channel.name
+    result = client.sheets.record_swap(branch, item, qty, reason, str(interaction.user))
+
+    embed = discord.Embed(
+        title="🔄 Зүйл солилоо",
+        description=f"**{branch}** салбарын **{item}** ({qty}ш) солигдов.",
+        color=0xE74C3C
+    )
+    embed.add_field(name="📋 Шалтгаан", value=reason, inline=True)
+    embed.add_field(name="📦 Агуулахад үлдэгдэл", value=f"`{result['remaining']}ш`", inline=True)
+    embed.set_footer(text=f"Бүртгэсэн: {interaction.user} · {result['date']}")
+    await interaction.followup.send(embed=embed)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -389,6 +515,15 @@ async def help_cmd(interaction: discord.Interaction):
     )
 
     embed.add_field(
+        name="📤 `/return`  —  Зассан зүйлийг салбарт буцаах",
+        value=(
+            "`rep_id` — Зассан REP ID\n"
+            "→ Fixed tab-д **Буцаасан** хүн/огноо бичигдэнэ"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
         name="🔍 `/status`  —  Статус шалгах",
         value=(
             "`id` — `SHP-XXXX` эсвэл `REP-XXXX`\n"
@@ -402,7 +537,17 @@ async def help_cmd(interaction: discord.Interaction):
         value=(
             "`shift` — 🌅 Өглөө эсвэл 🌙 Орой\n"
             "→ Form гарч ирнэ: Ажилтан, Бэлэн, Карт, Зардал, Орлого\n"
-            "→ Салбар автоматаар channel нэрээр тогтоно"
+            "→ Салбар бүрт тусдаа sheet tab үүснэ"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="📦 Агуулах командууд",
+        value=(
+            "`/aguulakh` — Энэ салбарын агуулах харах\n"
+            "`/stock_add item:mouse qty:10` — Нэмэх (сөрөг тоо хасна)\n"
+            "`/swap item:mouse qty:1 reason:эвдэрсэн` — Солих + лог"
         ),
         inline=False
     )
@@ -410,9 +555,9 @@ async def help_cmd(interaction: discord.Interaction):
     embed.add_field(
         name="📌 Workflow",
         value=(
-            "**Салбар:** `/shipment` → SHP + REP үүснэ\n"
-            "**Засварын газар:** `/received` → `/fix` (тус бүрт)\n"
-            "**Ээлж:** `/toootsoo` өглөө/орой бүрт нэг удаа"
+            "**Засвар:** `/shipment` → `/received` → `/fix` → `/return`\n"
+            "**Тооцоо:** өглөө/орой `/toootsoo`\n"
+            "**Агуулах:** `/swap` — эвдэрсэн зүйл солих + автомат хасна"
         ),
         inline=False
     )

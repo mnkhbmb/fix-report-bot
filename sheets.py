@@ -38,7 +38,11 @@ CREDS_FILE = os.environ.get("GOOGLE_CREDS_FILE", "credentials.json")
 TAB_REP = "Repairs"
 TAB_FIX = "Fixed"
 TAB_SHP = "Shipments"
-TAB_TOO = "Toootsoo"
+TAB_SWAP = "Солилт"
+# Тооцоо нь салбар бүрт тусдаа tab үүснэ: "Тооцоо-{branch}"
+TOO_PREFIX = "Тооцоо-"
+# Агуулах бас салбар бүрт тусдаа tab: "Агуулах-{branch}"
+AGU_PREFIX = "Агуулах-"
 
 REP_HEADERS = [
     "REP ID", "SHP ID", "Салбар", "Зүйл", "Тоо",
@@ -47,7 +51,8 @@ REP_HEADERS = [
 FIX_HEADERS = [
     "REP ID", "SHP ID", "Салбар", "Зүйл", "Тоо",
     "Бүртгэсэн", "Бүртгэсэн огноо",
-    "Засварласан хүн", "Засварласан огноо", "Тайлбар"
+    "Засварласан хүн", "Засварласан огноо", "Тайлбар",
+    "Буцаасан хүн", "Буцаасан огноо"
 ]
 SHP_HEADERS = [
     "SHP ID", "Салбар", "Бүртгэсэн", "Огноо",
@@ -58,18 +63,23 @@ TOO_HEADERS = [
     "Бэлэн", "Карт", "Зардал", "Зардлын задаргаа",
     "Орлого", "Орлогын задаргаа", "Нийт", "Бүртгэсэн"
 ]
+AGU_HEADERS = ["Зүйл", "Тоо", "Сүүлд шинэчилсэн", "Тэмдэглэл"]
+SWAP_HEADERS = ["Огноо", "Салбар", "Зүйл", "Тоо", "Шалтгаан", "Бүртгэсэн"]
 
 # Repairs баганы индекс
 R_ID, R_SHP, R_BRANCH, R_ITEM, R_QTY, R_BY, R_DATE, R_STATUS = range(8)
 
 # Fixed баганы индекс
-F_ID, F_SHP, F_BRANCH, F_ITEM, F_QTY, F_BY, F_DATE, F_FIX_BY, F_FIX_DATE, F_NOTES = range(10)
+F_ID, F_SHP, F_BRANCH, F_ITEM, F_QTY, F_BY, F_DATE, F_FIX_BY, F_FIX_DATE, F_NOTES, F_RET_BY, F_RET_DATE = range(12)
 
 # Shipments баганы индекс
 S_ID, S_BRANCH, S_BY, S_DATE, S_STATUS, S_REC_BY, S_REC_DATE, S_NOTES = range(8)
 
 # Toootsoo баганы индекс
 T_DATE, T_BRANCH, T_SHIFT, T_WORKER, T_CASH, T_CARD, T_EXP, T_EXP_DETAIL, T_INC, T_INC_DETAIL, T_TOTAL, T_BY = range(12)
+
+# Агуулах баганы индекс
+A_ITEM, A_QTY, A_UPDATED, A_NOTES = range(4)
 
 
 def _now() -> str:
@@ -92,7 +102,7 @@ class SheetsClient:
         meta = self.svc.get(spreadsheetId=SHEET_ID).execute()
         existing = {s["properties"]["title"] for s in meta["sheets"]}
         new_tabs = [
-            t for t in [TAB_REP, TAB_FIX, TAB_SHP, TAB_TOO] if t not in existing
+            t for t in [TAB_REP, TAB_FIX, TAB_SHP, TAB_SWAP] if t not in existing
         ]
         if new_tabs:
             self.svc.batchUpdate(
@@ -103,9 +113,20 @@ class SheetsClient:
             ).execute()
         for tab, headers in [
             (TAB_REP, REP_HEADERS), (TAB_FIX, FIX_HEADERS),
-            (TAB_SHP, SHP_HEADERS), (TAB_TOO, TOO_HEADERS)
+            (TAB_SHP, SHP_HEADERS), (TAB_SWAP, SWAP_HEADERS)
         ]:
             self._ensure_header(tab, headers)
+
+    def _ensure_tab(self, tab: str, headers: list):
+        """Tab байхгүй бол үүсгэнэ, толгойг шалгана."""
+        meta = self.svc.get(spreadsheetId=SHEET_ID).execute()
+        existing = {s["properties"]["title"] for s in meta["sheets"]}
+        if tab not in existing:
+            self.svc.batchUpdate(
+                spreadsheetId=SHEET_ID,
+                body={"requests": [{"addSheet": {"properties": {"title": tab}}}]}
+            ).execute()
+        self._ensure_header(tab, headers)
 
     def _ensure_header(self, tab: str, headers: list):
         rows = self._get_rows(tab)
@@ -318,12 +339,13 @@ class SheetsClient:
         # Fixed tab (дууссан)
         for row in self._get_rows(TAB_FIX)[1:]:
             if _safe(row, F_SHP) == shp_id:
+                returned = bool(_safe(row, F_RET_DATE))
                 reps.append({
                     "rep_id":   _safe(row, F_ID),
                     "item":     _safe(row, F_ITEM),
                     "qty":      _safe(row, F_QTY),
-                    "status":   "Засварласан",
-                    "location": "fixed"
+                    "status":   "Буцаасан" if returned else "Засварласан",
+                    "location": "returned" if returned else "fixed"
                 })
 
         return {
@@ -354,18 +376,126 @@ class SheetsClient:
         row_num = self._find_row(TAB_FIX, F_ID, rep_id)
         if row_num is not None:
             row = self._get_rows(TAB_FIX)[row_num - 1]
+            returned = bool(_safe(row, F_RET_DATE))
             return {
                 "rep_id":   rep_id,
                 "shp_id":   _safe(row, F_SHP),
                 "branch":   _safe(row, F_BRANCH),
                 "item":     _safe(row, F_ITEM),
                 "qty":      _safe(row, F_QTY),
-                "status":   "Засварласан",
-                "location": "fixed",
-                "notes":    _safe(row, F_NOTES)
+                "status":   "Буцаасан" if returned else "Засварласан",
+                "location": "returned" if returned else "fixed",
+                "notes":    _safe(row, F_NOTES),
+                "ret_by":   _safe(row, F_RET_BY),
+                "ret_date": _safe(row, F_RET_DATE)
             }
 
         return None
+
+    def mark_returned(self, rep_id: str, returned_by: str) -> Optional[dict]:
+        """
+        Зассан REP-ийг салбар руу буцаасан гэж тэмдэглэнэ.
+        Fixed tab дотроос хайж "Буцаасан хүн", "Буцаасан огноо" талбар бөглөнө.
+        """
+        row_num = self._find_row(TAB_FIX, F_ID, rep_id)
+        if row_num is None:
+            return None
+
+        row = self._get_rows(TAB_FIX)[row_num - 1]
+
+        # Аль хэдийн буцаасан эсэхийг шалгана
+        if _safe(row, F_RET_DATE):
+            return {"already_returned": True,
+                    "ret_by": _safe(row, F_RET_BY),
+                    "ret_date": _safe(row, F_RET_DATE)}
+
+        now = _now()
+        self._update_cell(TAB_FIX, row_num, "K", returned_by)   # F_RET_BY
+        self._update_cell(TAB_FIX, row_num, "L", now)           # F_RET_DATE
+
+        return {
+            "rep_id":   rep_id,
+            "shp_id":   _safe(row, F_SHP),
+            "branch":   _safe(row, F_BRANCH),
+            "item":     _safe(row, F_ITEM),
+            "qty":      _safe(row, F_QTY),
+            "fix_by":   _safe(row, F_FIX_BY),
+            "fix_date": _safe(row, F_FIX_DATE),
+            "ret_by":   returned_by,
+            "ret_date": now
+        }
+
+    # ── Агуулах ──────────────────────────────────────────────────────────────
+
+    def get_aguulakh(self, branch: str) -> list[dict]:
+        """Тухайн салбарын агуулах дахь бүх зүйлс."""
+        tab = f"{AGU_PREFIX}{branch}"
+        self._ensure_tab(tab, AGU_HEADERS)
+        rows = self._get_rows(tab)
+        result = []
+        for row in rows[1:]:
+            if not row or not _safe(row, A_ITEM):
+                continue
+            try:
+                qty = int(_safe(row, A_QTY) or 0)
+            except ValueError:
+                qty = 0
+            result.append({
+                "item":    _safe(row, A_ITEM),
+                "qty":     qty,
+                "updated": _safe(row, A_UPDATED),
+                "notes":   _safe(row, A_NOTES)
+            })
+        return result
+
+    def adjust_stock(self, branch: str, item: str, delta: int,
+                     notes: str = "") -> dict:
+        """
+        Агуулах дахь зүйлийн тоог нэмэх/хасах.
+        delta > 0 — нэмнэ, delta < 0 — хасна.
+        Зүйл байхгүй бол шинээр үүсгэнэ.
+        """
+        tab = f"{AGU_PREFIX}{branch}"
+        self._ensure_tab(tab, AGU_HEADERS)
+        rows = self._get_rows(tab)
+        now = _now()
+
+        for i, row in enumerate(rows[1:], start=2):
+            if _safe(row, A_ITEM).strip().lower() == item.strip().lower():
+                try:
+                    cur = int(_safe(row, A_QTY) or 0)
+                except ValueError:
+                    cur = 0
+                new_qty = max(0, cur + delta)
+                self._update_cell(tab, i, "B", str(new_qty))
+                self._update_cell(tab, i, "C", now)
+                if notes:
+                    self._update_cell(tab, i, "D", notes)
+                return {"item": item, "old_qty": cur, "new_qty": new_qty, "created": False}
+
+        # Шинэ зүйл
+        new_qty = max(0, delta)
+        self._append_row(tab, [item, str(new_qty), now, notes])
+        return {"item": item, "old_qty": 0, "new_qty": new_qty, "created": True}
+
+    def record_swap(self, branch: str, item: str, qty: int,
+                    reason: str, recorded_by: str) -> dict:
+        """
+        Зүйл солисон бүртгэл хийнэ — Солилт tab-д лог + Агуулахаас хасна.
+        """
+        adj = self.adjust_stock(branch, item, -qty)
+        today = datetime.now().strftime("%Y-%m-%d")
+        self._append_row(TAB_SWAP, [
+            today, branch, item, str(qty), reason, recorded_by
+        ])
+        return {
+            "date":    today,
+            "branch":  branch,
+            "item":    item,
+            "qty":     qty,
+            "reason":  reason,
+            "remaining": adj["new_qty"]
+        }
 
     # ── Тооцоо ────────────────────────────────────────────────────────────────
 
@@ -384,10 +514,12 @@ class SheetsClient:
 
         exp_detail = ", ".join(f"{e['desc']} {e['amount']}" for e in expenses)
         inc_detail = ", ".join(f"{i['desc']} {i['amount']}" for i in incomes)
-        now = _now()
         today = datetime.now().strftime("%Y-%m-%d")
 
-        self._append_row(TAB_TOO, [
+        # Салбар бүрд тусдаа tab
+        tab = f"{TOO_PREFIX}{branch}"
+        self._ensure_tab(tab, TOO_HEADERS)
+        self._append_row(tab, [
             today, branch, shift, worker,
             str(cash), str(card),
             str(total_exp), exp_detail,
