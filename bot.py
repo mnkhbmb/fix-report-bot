@@ -9,8 +9,9 @@ bot.py — Засварын бүртгэлийн Discord Bot v3
 """
 
 import discord
-from discord import app_commands
+from discord import app_commands, ui
 import os
+import re
 from dotenv import load_dotenv
 from sheets import SheetsClient
 
@@ -42,7 +43,6 @@ def check_channel(interaction: discord.Interaction) -> bool:
 
 def _parse_items(raw: str) -> list[dict]:
     """'1 mouse, 2 keyboard, 10 чихэвч' → [{"qty":1,"item":"mouse"}, ...]"""
-    import re
     results = []
     for part in raw.split(","):
         m = re.match(r"^\s*(\d+)\s+(.+?)\s*$", part.strip())
@@ -226,6 +226,128 @@ async def status_cmd(interaction: discord.Interaction, id: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  /toootsoo  — Өдрийн тооцоо (Modal form)
+# ═══════════════════════════════════════════════════════════════════════════════
+def _parse_amount_lines(raw: str) -> list[dict]:
+    """
+    Multi-line text-аас [{"desc": "...", "amount": N}] жагсаалт хийнэ.
+    Жишээ:  'Нацагаа цаг 3500\\nGameranger error 9250'
+            'Нацагаа цаг - 3500, Gameranger 9250'
+    """
+    if not raw or not raw.strip():
+        return []
+    results = []
+    # Мөр болон comma хоёуланг нь separator болгож хуваана
+    parts = re.split(r"[\n,]+", raw)
+    for part in parts:
+        part = part.strip().replace("-", " ")
+        if not part:
+            continue
+        m = re.match(r"^(.+?)\s+(\d[\d\s,]*)$", part)
+        if m:
+            desc = m.group(1).strip()
+            amount = int(re.sub(r"[\s,]", "", m.group(2)))
+            results.append({"desc": desc, "amount": amount})
+    return results
+
+
+def _parse_int(raw: str) -> int:
+    """'1,500,000' эсвэл '1500000' → 1500000"""
+    if not raw:
+        return 0
+    cleaned = re.sub(r"[^\d]", "", raw)
+    return int(cleaned) if cleaned else 0
+
+
+class ToootsooModal(ui.Modal, title="📊 Өдрийн тооцоо"):
+    def __init__(self, branch: str, shift: str):
+        super().__init__()
+        self.branch = branch
+        self.shift  = shift
+
+    worker = ui.TextInput(
+        label="Ажилтны нэр",
+        placeholder="жш: Дөлгөөн",
+        required=True, max_length=50
+    )
+    cash = ui.TextInput(
+        label="Бэлэн (₮)",
+        placeholder="жш: 109500",
+        required=True, max_length=15
+    )
+    card = ui.TextInput(
+        label="Карт (₮)",
+        placeholder="жш: 1158750",
+        required=True, max_length=15
+    )
+    expenses = ui.TextInput(
+        label="Зардал (мөр бүрт: тайлбар дүн)",
+        placeholder="Нацагаа цаг 3500\nGameranger error 9250",
+        required=False, style=discord.TextStyle.paragraph, max_length=500
+    )
+    incomes = ui.TextInput(
+        label="Нэмэлт орлого (заавал биш)",
+        placeholder="Зээл буцаалт 5000",
+        required=False, style=discord.TextStyle.paragraph, max_length=500
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+
+        cash_n = _parse_int(self.cash.value)
+        card_n = _parse_int(self.card.value)
+        exp_list = _parse_amount_lines(self.expenses.value)
+        inc_list = _parse_amount_lines(self.incomes.value)
+
+        result = client.sheets.add_toootsoo(
+            branch=self.branch, shift=self.shift,
+            worker=self.worker.value.strip(),
+            cash=cash_n, card=card_n,
+            expenses=exp_list, incomes=inc_list,
+            reported_by=str(interaction.user)
+        )
+
+        shift_emoji = "🌅" if "өглөө" in self.shift.lower() else "🌙"
+        embed = discord.Embed(
+            title=f"{shift_emoji} {result['date']} — {self.shift}",
+            description=f"**{self.branch}** · {result['worker']}",
+            color=0x2ECC71
+        )
+
+        if exp_list:
+            lines = "\n".join(f"• {e['desc']} — `{e['amount']:,}₮`" for e in exp_list)
+            embed.add_field(name="📉 Зардал", value=lines, inline=False)
+        if inc_list:
+            lines = "\n".join(f"• {i['desc']} — `{i['amount']:,}₮`" for i in inc_list)
+            embed.add_field(name="📈 Нэмэлт орлого", value=lines, inline=False)
+
+        summary = (
+            f"**Бэлэн** — `{cash_n:,}₮`\n"
+            f"**Карт**  — `{card_n:,}₮`\n"
+            f"**Зардал** — `{result['total_exp']:,}₮`\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"**🧮 Нийт** — `{result['net_total']:,}₮`"
+        )
+        embed.add_field(name="💰 Дүн", value=summary, inline=False)
+        embed.set_footer(text=f"Бүртгэсэн: {interaction.user}")
+
+        await interaction.followup.send(embed=embed)
+
+
+@client.tree.command(name="toootsoo", description="Өдрийн тооцоо бүртгэх (form гарч ирнэ)")
+@app_commands.describe(shift="Ээлж сонгоно уу")
+@app_commands.choices(shift=[
+    app_commands.Choice(name="🌅 Өглөө",  value="Өглөө"),
+    app_commands.Choice(name="🌙 Орой",  value="Орой"),
+])
+async def toootsoo_cmd(interaction: discord.Interaction, shift: app_commands.Choice[str]):
+    # Channel нэрийг салбар болгоно (#4-муис → "4-муис")
+    branch = interaction.channel.name
+    modal = ToootsooModal(branch=branch, shift=shift.value)
+    await interaction.response.send_modal(modal)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  /help  — Командуудын жагсаалт
 # ═══════════════════════════════════════════════════════════════════════════════
 @client.tree.command(name="help", description="Засварын бүртгэлийн бүх командын жагсаалт")
@@ -276,10 +398,21 @@ async def help_cmd(interaction: discord.Interaction):
     )
 
     embed.add_field(
+        name="📊 `/toootsoo`  —  Өдрийн тооцоо бүртгэх",
+        value=(
+            "`shift` — 🌅 Өглөө эсвэл 🌙 Орой\n"
+            "→ Form гарч ирнэ: Ажилтан, Бэлэн, Карт, Зардал, Орлого\n"
+            "→ Салбар автоматаар channel нэрээр тогтоно"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
         name="📌 Workflow",
         value=(
             "**Салбар:** `/shipment` → SHP + REP үүснэ\n"
-            "**Засварын газар:** `/received` → `/fix` (тус бүрт)"
+            "**Засварын газар:** `/received` → `/fix` (тус бүрт)\n"
+            "**Ээлж:** `/toootsoo` өглөө/орой бүрт нэг удаа"
         ),
         inline=False
     )

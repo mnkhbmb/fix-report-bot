@@ -38,6 +38,7 @@ CREDS_FILE = os.environ.get("GOOGLE_CREDS_FILE", "credentials.json")
 TAB_REP = "Repairs"
 TAB_FIX = "Fixed"
 TAB_SHP = "Shipments"
+TAB_TOO = "Toootsoo"
 
 REP_HEADERS = [
     "REP ID", "SHP ID", "Салбар", "Зүйл", "Тоо",
@@ -52,6 +53,11 @@ SHP_HEADERS = [
     "SHP ID", "Салбар", "Бүртгэсэн", "Огноо",
     "Статус", "Хүлээж авсан хүн", "Хүлээж авсан огноо", "Тайлбар"
 ]
+TOO_HEADERS = [
+    "Огноо", "Салбар", "Ээлж", "Ажилтан",
+    "Бэлэн", "Карт", "Зардал", "Зардлын задаргаа",
+    "Орлого", "Орлогын задаргаа", "Нийт", "Бүртгэсэн"
+]
 
 # Repairs баганы индекс
 R_ID, R_SHP, R_BRANCH, R_ITEM, R_QTY, R_BY, R_DATE, R_STATUS = range(8)
@@ -61,6 +67,9 @@ F_ID, F_SHP, F_BRANCH, F_ITEM, F_QTY, F_BY, F_DATE, F_FIX_BY, F_FIX_DATE, F_NOTE
 
 # Shipments баганы индекс
 S_ID, S_BRANCH, S_BY, S_DATE, S_STATUS, S_REC_BY, S_REC_DATE, S_NOTES = range(8)
+
+# Toootsoo баганы индекс
+T_DATE, T_BRANCH, T_SHIFT, T_WORKER, T_CASH, T_CARD, T_EXP, T_EXP_DETAIL, T_INC, T_INC_DETAIL, T_TOTAL, T_BY = range(12)
 
 
 def _now() -> str:
@@ -83,7 +92,7 @@ class SheetsClient:
         meta = self.svc.get(spreadsheetId=SHEET_ID).execute()
         existing = {s["properties"]["title"] for s in meta["sheets"]}
         new_tabs = [
-            t for t in [TAB_REP, TAB_FIX, TAB_SHP] if t not in existing
+            t for t in [TAB_REP, TAB_FIX, TAB_SHP, TAB_TOO] if t not in existing
         ]
         if new_tabs:
             self.svc.batchUpdate(
@@ -92,7 +101,10 @@ class SheetsClient:
                     {"addSheet": {"properties": {"title": t}}} for t in new_tabs
                 ]}
             ).execute()
-        for tab, headers in [(TAB_REP, REP_HEADERS), (TAB_FIX, FIX_HEADERS), (TAB_SHP, SHP_HEADERS)]:
+        for tab, headers in [
+            (TAB_REP, REP_HEADERS), (TAB_FIX, FIX_HEADERS),
+            (TAB_SHP, SHP_HEADERS), (TAB_TOO, TOO_HEADERS)
+        ]:
             self._ensure_header(tab, headers)
 
     def _ensure_header(self, tab: str, headers: list):
@@ -354,3 +366,45 @@ class SheetsClient:
             }
 
         return None
+
+    # ── Тооцоо ────────────────────────────────────────────────────────────────
+
+    def add_toootsoo(self, branch: str, shift: str, worker: str,
+                     cash: int, card: int,
+                     expenses: list[dict], incomes: list[dict],
+                     reported_by: str) -> dict:
+        """
+        Өдрийн тооцоо бүртгэнэ.
+        expenses/incomes — [{"desc": "Нацагаа цаг", "amount": 3500}, ...]
+        Нийт = Бэлэн + Карт + Зардал (зардал бэлэн дотроос гарсан тул нэмж тооцно)
+        """
+        total_exp = sum(e["amount"] for e in expenses)
+        total_inc = sum(i["amount"] for i in incomes)
+        net_total = cash + card + total_exp - total_inc
+
+        exp_detail = ", ".join(f"{e['desc']} {e['amount']}" for e in expenses)
+        inc_detail = ", ".join(f"{i['desc']} {i['amount']}" for i in incomes)
+        now = _now()
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        self._append_row(TAB_TOO, [
+            today, branch, shift, worker,
+            str(cash), str(card),
+            str(total_exp), exp_detail,
+            str(total_inc), inc_detail,
+            str(net_total), reported_by
+        ])
+
+        return {
+            "date":       today,
+            "branch":     branch,
+            "shift":      shift,
+            "worker":     worker,
+            "cash":       cash,
+            "card":       card,
+            "expenses":   expenses,
+            "incomes":    incomes,
+            "total_exp":  total_exp,
+            "total_inc":  total_inc,
+            "net_total":  net_total
+        }
