@@ -430,17 +430,13 @@ def _parse_int(raw: str) -> int:
 
 
 class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
-    def __init__(self, branch: str, shift: str):
+    def __init__(self, branch: str, shift: str, worker: str):
         super().__init__()
         self.branch = branch
         self.shift  = shift
+        self.worker = worker
         self.time_range = SHIFT_TIMES.get(shift, "")
 
-    worker = ui.TextInput(
-        label="Ажилтны нэр",
-        placeholder="жш: lof",
-        required=True, max_length=50
-    )
     cash = ui.TextInput(
         label="Бэлэн (₮)",
         placeholder="жш: 80000",
@@ -451,31 +447,33 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
         placeholder="жш: 562450",
         required=True, max_length=15
     )
-    dans_zardal = ui.TextInput(
-        label="Данс / Зардал (₮)  —  жш: 0 / 40000",
-        placeholder="Данс ба зардлыг / тэмдэгээр тусгаарлана: 0 / 40000",
-        required=False, max_length=40, default="0 / 0"
+    dans = ui.TextInput(
+        label="Данс (₮)",
+        placeholder="жш: 0",
+        required=False, max_length=15, default="0"
+    )
+    zardal = ui.TextInput(
+        label="Зардал (₮)",
+        placeholder="жш: 40000",
+        required=False, max_length=15, default="0"
     )
     notes = ui.TextInput(
         label="Зардлын задаргаа (заавал биш)",
-        placeholder="жш: Нацагаа цаг - 11000",
+        placeholder="жш: баллонтой ус - 8800",
         required=False, style=discord.TextStyle.paragraph, max_length=500
     )
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
 
-        cash_n = _parse_int(self.cash.value)
-        card_n = _parse_int(self.card.value)
-
-        # "0 / 40000" → данс=0, зардал=40000
-        parts = re.split(r"[/|]", self.dans_zardal.value or "")
-        dans_n   = _parse_int(parts[0]) if len(parts) > 0 else 0
-        zardal_n = _parse_int(parts[1]) if len(parts) > 1 else 0
+        cash_n   = _parse_int(self.cash.value)
+        card_n   = _parse_int(self.card.value)
+        dans_n   = _parse_int(self.dans.value)
+        zardal_n = _parse_int(self.zardal.value)
 
         result = client.sheets.add_haalt(
             branch=self.branch, shift=self.shift, time_range=self.time_range,
-            worker=self.worker.value.strip(),
+            worker=self.worker.strip(),
             cash=cash_n, card=card_n, dans=dans_n, zardal=zardal_n,
             notes=(self.notes.value or "").strip(),
             reported_by=str(interaction.user)
@@ -508,12 +506,13 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
 
 
 @client.tree.command(name="haalt", description="Ээлжийн хаалт / тооцоо бүртгэх (form гарч ирнэ)")
-@app_commands.describe(eelj="Ээлж сонгоно уу")
+@app_commands.describe(eelj="Ээлж сонгоно уу", ajiltan="Ажилтны нэр")
 @app_commands.choices(eelj=[
     app_commands.Choice(name="🌅 Өдөр (09:00-19:00)", value="Өдөр"),
     app_commands.Choice(name="🌙 Орой (19:00-09:00)", value="Орой"),
 ])
-async def haalt_cmd(interaction: discord.Interaction, eelj: app_commands.Choice[str]):
+async def haalt_cmd(interaction: discord.Interaction,
+                    eelj: app_commands.Choice[str], ajiltan: str):
     # Зөвхөн тооцооны бүлгийн (category) сувгуудад зөвшөөрнө
     if HAALT_CATEGORY_ID is not None and not _is_haalt_here(interaction.channel):
         return await interaction.response.send_message(
@@ -521,7 +520,7 @@ async def haalt_cmd(interaction: discord.Interaction, eelj: app_commands.Choice[
 
     # Channel нэрийг салбар болгоно
     branch = interaction.channel.name
-    modal = HaaltModal(branch=branch, shift=eelj.value)
+    modal = HaaltModal(branch=branch, shift=eelj.value, worker=ajiltan)
     await interaction.response.send_modal(modal)
 
 
@@ -588,7 +587,8 @@ async def help_cmd(interaction: discord.Interaction):
         name="🧮 `/haalt`  —  Ээлжийн хаалт / тооцоо бүртгэх",
         value=(
             "`eelj` — 🌅 Өдөр (09:00-19:00) эсвэл 🌙 Орой (19:00-09:00)\n"
-            "→ Form гарч ирнэ: Ажилтан, Бэлэн, Карт, Данс/Зардал, Зардлын задаргаа\n"
+            "`ajiltan` — Ажилтны нэр\n"
+            "→ Form гарч ирнэ: Бэлэн, Карт, Данс, Зардал, Зардлын задаргаа\n"
             "→ **Нийт** = Бэлэн + Карт + Данс + Зардал автоматаар бодогдоно\n"
             "→ Салбар бүрт тусдаа sheet tab үүснэ"
         ),
