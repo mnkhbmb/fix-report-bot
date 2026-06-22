@@ -650,10 +650,16 @@ async def on_message(message: discord.Message):
         pass
 
 
+async def _sync_guild(guild: discord.Guild):
+    """Global командуудыг тухайн серверт хуулж шууд sync хийнэ (1 цаг хүлээхгүй)."""
+    client.tree.copy_global_to(guild=guild)
+    await client.tree.sync(guild=guild)
+
+
 @client.event
 async def on_guild_join(guild: discord.Guild):
     """Бот шинэ серверт нэгдэхэд тэр даруй slash командуудыг sync хийнэ."""
-    await client.tree.sync(guild=guild)
+    await _sync_guild(guild)
     print(f"✅  Шинэ серверт sync → {guild.name}")
 
 
@@ -661,7 +667,7 @@ async def on_guild_join(guild: discord.Guild):
 async def on_ready():
     print(f"✅  Bot нэвтэрлээ: {client.user}")
     for guild in client.guilds:
-        await client.tree.sync(guild=guild)
+        await _sync_guild(guild)
         print(f"✅  Slash командууд sync → {guild.name}")
 
 
