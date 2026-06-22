@@ -414,6 +414,12 @@ async def swap_cmd(interaction: discord.Interaction, item: str, qty: int, reason
 SHIFT_TIMES = {
     "Өдөр": "09:00-19:00",
     "Орой": "19:00-09:00",
+    "Бүтэн гараа": "",   # цаг бичихгүй
+}
+SHIFT_EMOJI = {
+    "Өдөр": "🌅",
+    "Орой": "🌙",
+    "Бүтэн гараа": "🌗",
 }
 
 
@@ -479,9 +485,10 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
             reported_by=str(interaction.user)
         )
 
-        shift_emoji = "🌅" if self.shift == "Өдөр" else "🌙"
+        shift_emoji = SHIFT_EMOJI.get(self.shift, "🕘")
+        shift_label = f"{self.shift} /{self.time_range}/" if self.time_range else self.shift
         embed = discord.Embed(
-            title=f"{shift_emoji} {result['date']} — {self.shift} /{self.time_range}/",
+            title=f"{shift_emoji} {result['date']} — {shift_label}",
             description=f"**{self.branch}** · {result['worker']}",
             color=0x2ECC71
         )
@@ -510,6 +517,7 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
 @app_commands.choices(eelj=[
     app_commands.Choice(name="🌅 Өдөр (09:00-19:00)", value="Өдөр"),
     app_commands.Choice(name="🌙 Орой (19:00-09:00)", value="Орой"),
+    app_commands.Choice(name="🌗 Бүтэн гараа", value="Бүтэн гараа"),
 ])
 async def haalt_cmd(interaction: discord.Interaction,
                     eelj: app_commands.Choice[str], ajiltan: str):
