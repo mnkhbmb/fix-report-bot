@@ -438,7 +438,7 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
 
     worker = ui.TextInput(
         label="Ажилтны нэр",
-        placeholder="жш: Тэмүүжин",
+        placeholder="жш: lof",
         required=True, max_length=50
     )
     cash = ui.TextInput(
@@ -457,8 +457,8 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
         required=False, max_length=40, default="0 / 0"
     )
     notes = ui.TextInput(
-        label="Тэмдэглэл (заавал биш)",
-        placeholder="vip2- 88, 85, лангийн дундуур унтарсан...",
+        label="Зардлын задаргаа (заавал биш)",
+        placeholder="жш: Нацагаа цаг - 11000",
         required=False, style=discord.TextStyle.paragraph, max_length=500
     )
 
@@ -501,7 +501,7 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
         embed.add_field(name="💰 Дүн", value="\n".join(lines), inline=False)
 
         if result["notes"]:
-            embed.add_field(name="📝 Тэмдэглэл", value=result["notes"], inline=False)
+            embed.add_field(name="📝 Зардлын задаргаа", value=result["notes"], inline=False)
         embed.set_footer(text=f"Бүртгэсэн: {interaction.user}")
 
         await interaction.followup.send(embed=embed)
@@ -588,7 +588,7 @@ async def help_cmd(interaction: discord.Interaction):
         name="🧮 `/haalt`  —  Ээлжийн хаалт / тооцоо бүртгэх",
         value=(
             "`eelj` — 🌅 Өдөр (09:00-19:00) эсвэл 🌙 Орой (19:00-09:00)\n"
-            "→ Form гарч ирнэ: Ажилтан, Бэлэн, Карт, Данс/Зардал, Тэмдэглэл\n"
+            "→ Form гарч ирнэ: Ажилтан, Бэлэн, Карт, Данс/Зардал, Зардлын задаргаа\n"
             "→ **Нийт** = Бэлэн + Карт + Данс + Зардал автоматаар бодогдоно\n"
             "→ Салбар бүрт тусдаа sheet tab үүснэ"
         ),
