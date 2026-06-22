@@ -22,6 +22,7 @@ Shipments баганууд:
 import os
 import re
 import json
+import base64
 from datetime import datetime
 from typing import Optional
 from google.oauth2.service_account import Credentials
@@ -95,16 +96,32 @@ def _safe(row: list, idx: int) -> str:
 
 class SheetsClient:
     def __init__(self):
-        # Railway/cloud дээр файл биш, GOOGLE_CREDS_JSON env var-аас уншина.
-        creds_json = os.environ.get("GOOGLE_CREDS_JSON")
-        if creds_json:
-            info = json.loads(creds_json)
-            creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-        else:
-            creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
+        creds = self._load_credentials()
         svc = build("sheets", "v4", credentials=creds)
         self.svc = svc.spreadsheets()
         self._ensure_tabs()
+
+    @staticmethod
+    def _load_credentials() -> Credentials:
+        """
+        Service account credentials уншина. Эрэмбэ:
+          1) GOOGLE_CREDS_B64  — base64 болгосон JSON (Railway-д хамгийн найдвартай)
+          2) GOOGLE_CREDS_JSON — JSON текст шууд
+          3) GOOGLE_CREDS_FILE — локал credentials.json файл
+        """
+        b64 = os.environ.get("GOOGLE_CREDS_B64", "").strip()
+        if b64:
+            raw = base64.b64decode(b64).decode("utf-8")
+            return Credentials.from_service_account_info(json.loads(raw), scopes=SCOPES)
+
+        raw = os.environ.get("GOOGLE_CREDS_JSON", "").strip()
+        if raw:
+            # Зарим тохиолдолд гадуур илүү хашилттай орж ирдэг — цэвэрлэнэ
+            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+                raw = raw[1:-1].strip()
+            return Credentials.from_service_account_info(json.loads(raw), scopes=SCOPES)
+
+        return Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
 
     # ── Дотоод тусламж ────────────────────────────────────────────────────────
 
