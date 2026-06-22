@@ -651,9 +651,15 @@ async def on_message(message: discord.Message):
 
 
 @client.event
+async def on_guild_join(guild: discord.Guild):
+    """Бот шинэ серверт нэгдэхэд тэр даруй slash командуудыг sync хийнэ."""
+    await client.tree.sync(guild=guild)
+    print(f"✅  Шинэ серверт sync → {guild.name}")
+
+
+@client.event
 async def on_ready():
     print(f"✅  Bot нэвтэрлээ: {client.user}")
-    print(f"💬  Channel: #{CHANNEL_NAME}")
     for guild in client.guilds:
         await client.tree.sync(guild=guild)
         print(f"✅  Slash командууд sync → {guild.name}")
