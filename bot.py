@@ -12,13 +12,64 @@ import discord
 from discord import app_commands, ui
 import os
 import re
+import time
 from dotenv import load_dotenv
 from sheets import SheetsClient
 
-load_dotenv(dotenv_path=r"D:\project\discord bot\fix-report-bot\.env")
+# Локал дээр .env-ийг автоматаар олж уншина; Railway дээр жинхэнэ env var ашиглана.
+load_dotenv()
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 CHANNEL_NAME  = os.environ.get("REPAIR_CHANNEL_NAME", "repairs")
+
+# Засварын командууд (/shipment /received /fix /return) ажиллах салбарын сувгууд.
+# .env-д REPAIR_CHANNELS-ээр өөрчилнө. Хоосон бол ямар ч сувагт ажиллана.
+_DEFAULT_REPAIR_CHANNELS = (
+    "түмэн,2-спортын-төв-ордон,3-энхтайваны-төв-ордон,4-муис,4-ps,8-19,9-суис,10-цирк"
+)
+REPAIR_CHANNELS = {
+    c.strip().lower()
+    for c in os.environ.get("REPAIR_CHANNELS", _DEFAULT_REPAIR_CHANNELS).split(",")
+    if c.strip()
+}
+
+# Зөвхөн эдгээр салбарын сувгуудад л "/haalt ашигла" гэж сануулна (allow-list).
+# .env-д HAALT_CHANNELS-ээр өөрчилж болно (таслалаар). Хоосон бол доорх default.
+_DEFAULT_HAALT_CHANNELS = "түмэн,4-муис,3-энхтайваны-төв-ордон,4-ps,9-суис,10-цирк"
+HAALT_CHANNELS = {
+    c.strip().lower()
+    for c in os.environ.get("HAALT_CHANNELS", _DEFAULT_HAALT_CHANNELS).split(",")
+    if c.strip()
+}
+REMIND_COOLDOWN = 60  # секунд — нэг channel-д хэт олон сануулахаас сэргийлнэ
+_last_remind: dict[int, float] = {}
+
+
+def _int_env(name: str):
+    v = os.environ.get(name, "").strip()
+    return int(v) if v.isdigit() else None
+
+
+# Нэг серверийн дотор 2 category (суваг бүлэг) — ижил нэртэй суваг давхцахаас сэргийлнэ.
+# Category ID тохируулсан бол түүгээр, үгүй бол сувгийн нэрээр шийднэ.
+HAALT_CATEGORY_ID  = _int_env("HAALT_CATEGORY_ID")   # Тооцооны бүлэг
+REPAIR_CATEGORY_ID = _int_env("REPAIR_CATEGORY_ID")  # Засварын бүлэг
+
+
+def _is_haalt_here(channel) -> bool:
+    """Энэ суваг тооцооны бүлэгт (category) хамаарах уу."""
+    if HAALT_CATEGORY_ID is not None:
+        return getattr(channel, "category_id", None) == HAALT_CATEGORY_ID
+    chan = (getattr(channel, "name", "") or "").lower()
+    return chan in HAALT_CHANNELS
+
+
+def _is_repair_here(channel) -> bool:
+    """Энэ суваг засварын бүлэгт (category) хамаарах уу."""
+    if REPAIR_CATEGORY_ID is not None:
+        return getattr(channel, "category_id", None) == REPAIR_CATEGORY_ID
+    chan = (getattr(channel, "name", "") or "").lower()
+    return chan in REPAIR_CHANNELS
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -38,7 +89,11 @@ client = RepairBot()
 
 
 def check_channel(interaction: discord.Interaction) -> bool:
-    return interaction.channel.name == CHANNEL_NAME
+    """Засварын командыг зөвхөн засварын бүлгийн салбарын сувгуудад зөвшөөрнө."""
+    # Юу ч тохируулаагүй бол бүх сувагт зөвшөөрнө
+    if REPAIR_CATEGORY_ID is None and not REPAIR_CHANNELS:
+        return True
+    return _is_repair_here(interaction.channel)
 
 
 def _parse_items(raw: str) -> list[dict]:
@@ -56,17 +111,18 @@ def _parse_items(raw: str) -> list[dict]:
 # ═══════════════════════════════════════════════════════════════════════════════
 @client.tree.command(name="shipment", description="Засварт явуулах зүйлсийн багц бүртгэх")
 @app_commands.describe(
-    branch="Салбарын нэр",
     items="Жагсаалт: 1 mouse, 2 keyboard, 10 чихэвч",
     notes="Нэмэлт тайлбар (заавал биш)"
 )
-async def shipment_cmd(interaction: discord.Interaction, branch: str, items: str, notes: str = ""):
+async def shipment_cmd(interaction: discord.Interaction, items: str, notes: str = ""):
     if not check_channel(interaction):
         return await interaction.response.send_message(
-            f"❌ **#{CHANNEL_NAME}** channel дотор ашиглана уу.", ephemeral=True)
+            "❌ Энэ командыг **салбарын суваг** дотор ашиглана уу.", ephemeral=True)
 
     await interaction.response.defer()
 
+    # Салбарыг сувгийн нэрнээс автоматаар авна
+    branch = interaction.channel.name
     parsed = _parse_items(items)
     if not parsed:
         return await interaction.followup.send(
@@ -98,7 +154,7 @@ async def shipment_cmd(interaction: discord.Interaction, branch: str, items: str
 async def received_cmd(interaction: discord.Interaction, shp_id: str):
     if not check_channel(interaction):
         return await interaction.response.send_message(
-            f"❌ **#{CHANNEL_NAME}** channel дотор ашиглана уу.", ephemeral=True)
+            "❌ Энэ командыг **салбарын суваг** дотор ашиглана уу.", ephemeral=True)
 
     await interaction.response.defer()
 
@@ -130,7 +186,7 @@ async def received_cmd(interaction: discord.Interaction, shp_id: str):
 async def fix_cmd(interaction: discord.Interaction, rep_id: str, notes: str = ""):
     if not check_channel(interaction):
         return await interaction.response.send_message(
-            f"❌ **#{CHANNEL_NAME}** channel дотор ашиглана уу.", ephemeral=True)
+            "❌ Энэ командыг **салбарын суваг** дотор ашиглана уу.", ephemeral=True)
 
     await interaction.response.defer()
 
@@ -176,7 +232,7 @@ async def fix_cmd(interaction: discord.Interaction, rep_id: str, notes: str = ""
 async def return_cmd(interaction: discord.Interaction, rep_id: str):
     if not check_channel(interaction):
         return await interaction.response.send_message(
-            f"❌ **#{CHANNEL_NAME}** channel дотор ашиглана уу.", ephemeral=True)
+            "❌ Энэ командыг **салбарын суваг** дотор ашиглана уу.", ephemeral=True)
 
     await interaction.response.defer()
     result = client.sheets.mark_returned(rep_id.upper(), returned_by=str(interaction.user))
@@ -352,68 +408,57 @@ async def swap_cmd(interaction: discord.Interaction, item: str, qty: int, reason
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  /toootsoo  — Өдрийн тооцоо (Modal form)
+#  /haalt  — Ээлжийн хаалт / тооцоо (Modal form)
 # ═══════════════════════════════════════════════════════════════════════════════
-def _parse_amount_lines(raw: str) -> list[dict]:
-    """
-    Multi-line text-аас [{"desc": "...", "amount": N}] жагсаалт хийнэ.
-    Жишээ:  'Нацагаа цаг 3500\\nGameranger error 9250'
-            'Нацагаа цаг - 3500, Gameranger 9250'
-    """
-    if not raw or not raw.strip():
-        return []
-    results = []
-    # Мөр болон comma хоёуланг нь separator болгож хуваана
-    parts = re.split(r"[\n,]+", raw)
-    for part in parts:
-        part = part.strip().replace("-", " ")
-        if not part:
-            continue
-        m = re.match(r"^(.+?)\s+(\d[\d\s,]*)$", part)
-        if m:
-            desc = m.group(1).strip()
-            amount = int(re.sub(r"[\s,]", "", m.group(2)))
-            results.append({"desc": desc, "amount": amount})
-    return results
+# Ээлж бүрийн цагийн интервал
+SHIFT_TIMES = {
+    "Өдөр": "09:00-19:00",
+    "Орой": "19:00-09:00",
+}
 
 
 def _parse_int(raw: str) -> int:
-    """'1,500,000' эсвэл '1500000' → 1500000"""
+    """'1,500,000' эсвэл '-80 000' → 1500000 / -80000 (зөвхөн тоо + хасах тэмдэг)."""
     if not raw:
         return 0
+    raw = raw.strip()
+    neg = raw.startswith("-")
     cleaned = re.sub(r"[^\d]", "", raw)
-    return int(cleaned) if cleaned else 0
+    if not cleaned:
+        return 0
+    return -int(cleaned) if neg else int(cleaned)
 
 
-class ToootsooModal(ui.Modal, title="📊 Өдрийн тооцоо"):
+class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
     def __init__(self, branch: str, shift: str):
         super().__init__()
         self.branch = branch
         self.shift  = shift
+        self.time_range = SHIFT_TIMES.get(shift, "")
 
     worker = ui.TextInput(
         label="Ажилтны нэр",
-        placeholder="жш: Дөлгөөн",
+        placeholder="жш: Тэмүүжин",
         required=True, max_length=50
     )
     cash = ui.TextInput(
         label="Бэлэн (₮)",
-        placeholder="жш: 109500",
+        placeholder="жш: 80000",
         required=True, max_length=15
     )
     card = ui.TextInput(
         label="Карт (₮)",
-        placeholder="жш: 1158750",
+        placeholder="жш: 562450",
         required=True, max_length=15
     )
-    expenses = ui.TextInput(
-        label="Зардал (мөр бүрт: тайлбар дүн)",
-        placeholder="Нацагаа цаг 3500\nGameranger error 9250",
-        required=False, style=discord.TextStyle.paragraph, max_length=500
+    dans_zardal = ui.TextInput(
+        label="Данс / Зардал (₮)  —  жш: 0 / 40000",
+        placeholder="Данс ба зардлыг / тэмдэгээр тусгаарлана: 0 / 40000",
+        required=False, max_length=40, default="0 / 0"
     )
-    incomes = ui.TextInput(
-        label="Нэмэлт орлого (заавал биш)",
-        placeholder="Зээл буцаалт 5000",
+    notes = ui.TextInput(
+        label="Тэмдэглэл (заавал биш)",
+        placeholder="vip2- 88, 85, лангийн дундуур унтарсан...",
         required=False, style=discord.TextStyle.paragraph, max_length=500
     )
 
@@ -422,54 +467,61 @@ class ToootsooModal(ui.Modal, title="📊 Өдрийн тооцоо"):
 
         cash_n = _parse_int(self.cash.value)
         card_n = _parse_int(self.card.value)
-        exp_list = _parse_amount_lines(self.expenses.value)
-        inc_list = _parse_amount_lines(self.incomes.value)
 
-        result = client.sheets.add_toootsoo(
-            branch=self.branch, shift=self.shift,
+        # "0 / 40000" → данс=0, зардал=40000
+        parts = re.split(r"[/|]", self.dans_zardal.value or "")
+        dans_n   = _parse_int(parts[0]) if len(parts) > 0 else 0
+        zardal_n = _parse_int(parts[1]) if len(parts) > 1 else 0
+
+        result = client.sheets.add_haalt(
+            branch=self.branch, shift=self.shift, time_range=self.time_range,
             worker=self.worker.value.strip(),
-            cash=cash_n, card=card_n,
-            expenses=exp_list, incomes=inc_list,
+            cash=cash_n, card=card_n, dans=dans_n, zardal=zardal_n,
+            notes=(self.notes.value or "").strip(),
             reported_by=str(interaction.user)
         )
 
-        shift_emoji = "🌅" if "өглөө" in self.shift.lower() else "🌙"
+        shift_emoji = "🌅" if self.shift == "Өдөр" else "🌙"
         embed = discord.Embed(
-            title=f"{shift_emoji} {result['date']} — {self.shift}",
+            title=f"{shift_emoji} {result['date']} — {self.shift} /{self.time_range}/",
             description=f"**{self.branch}** · {result['worker']}",
             color=0x2ECC71
         )
 
-        if exp_list:
-            lines = "\n".join(f"• {e['desc']} — `{e['amount']:,}₮`" for e in exp_list)
-            embed.add_field(name="📉 Зардал", value=lines, inline=False)
-        if inc_list:
-            lines = "\n".join(f"• {i['desc']} — `{i['amount']:,}₮`" for i in inc_list)
-            embed.add_field(name="📈 Нэмэлт орлого", value=lines, inline=False)
+        lines = [
+            f"**Бэлэн** — `{cash_n:,}₮`",
+            f"**Карт**  — `{card_n:,}₮`",
+        ]
+        if dans_n:
+            lines.append(f"**Данс**  — `{dans_n:,}₮`")
+        if zardal_n:
+            lines.append(f"**Зардал** — `{zardal_n:,}₮`")
+        lines.append("━━━━━━━━━━━━━━━━━")
+        lines.append(f"**🧮 Нийт** — `{result['net_total']:,}₮`")
+        embed.add_field(name="💰 Дүн", value="\n".join(lines), inline=False)
 
-        summary = (
-            f"**Бэлэн** — `{cash_n:,}₮`\n"
-            f"**Карт**  — `{card_n:,}₮`\n"
-            f"**Зардал** — `{result['total_exp']:,}₮`\n"
-            f"━━━━━━━━━━━━━━━━━\n"
-            f"**🧮 Нийт** — `{result['net_total']:,}₮`"
-        )
-        embed.add_field(name="💰 Дүн", value=summary, inline=False)
+        if result["notes"]:
+            embed.add_field(name="📝 Тэмдэглэл", value=result["notes"], inline=False)
         embed.set_footer(text=f"Бүртгэсэн: {interaction.user}")
 
         await interaction.followup.send(embed=embed)
 
 
-@client.tree.command(name="toootsoo", description="Өдрийн тооцоо бүртгэх (form гарч ирнэ)")
-@app_commands.describe(shift="Ээлж сонгоно уу")
-@app_commands.choices(shift=[
-    app_commands.Choice(name="🌅 Өглөө",  value="Өглөө"),
-    app_commands.Choice(name="🌙 Орой",  value="Орой"),
+@client.tree.command(name="haalt", description="Ээлжийн хаалт / тооцоо бүртгэх (form гарч ирнэ)")
+@app_commands.describe(eelj="Ээлж сонгоно уу")
+@app_commands.choices(eelj=[
+    app_commands.Choice(name="🌅 Өдөр (09:00-19:00)", value="Өдөр"),
+    app_commands.Choice(name="🌙 Орой (19:00-09:00)", value="Орой"),
 ])
-async def toootsoo_cmd(interaction: discord.Interaction, shift: app_commands.Choice[str]):
-    # Channel нэрийг салбар болгоно (#4-муис → "4-муис")
+async def haalt_cmd(interaction: discord.Interaction, eelj: app_commands.Choice[str]):
+    # Зөвхөн тооцооны бүлгийн (category) сувгуудад зөвшөөрнө
+    if HAALT_CATEGORY_ID is not None and not _is_haalt_here(interaction.channel):
+        return await interaction.response.send_message(
+            "❌ `/haalt` командыг зөвхөн **тооцооны бүлгийн суваг**т ашиглана.", ephemeral=True)
+
+    # Channel нэрийг салбар болгоно
     branch = interaction.channel.name
-    modal = ToootsooModal(branch=branch, shift=shift.value)
+    modal = HaaltModal(branch=branch, shift=eelj.value)
     await interaction.response.send_modal(modal)
 
 
@@ -480,16 +532,16 @@ async def toootsoo_cmd(interaction: discord.Interaction, shift: app_commands.Cho
 async def help_cmd(interaction: discord.Interaction):
     embed = discord.Embed(
         title="📋 Засварын бүртгэлийн командууд",
-        description=f"Доорх командуудыг **#{CHANNEL_NAME}** channel дотор ашиглана уу.",
+        description="Доорх командуудыг тухайн **салбарын суваг** дотор ашиглана уу.",
         color=0x5865F2
     )
 
     embed.add_field(
         name="📦 `/shipment`  —  Засварт явуулах багц бүртгэх",
         value=(
-            "`branch` — Салбарын нэр\n"
             "`items` — Жагсаалт: `1 mouse, 2 keyboard, 10 чихэвч`\n"
             "`notes` — Нэмэлт тайлбар _(заавал биш)_\n"
+            "→ Салбар нь **сувгийн нэрнээс** автоматаар тодорхойлогдоно\n"
             "→ **SHP-XXXX** болон тус бүрт **REP-XXXX** үүснэ"
         ),
         inline=False
@@ -533,10 +585,11 @@ async def help_cmd(interaction: discord.Interaction):
     )
 
     embed.add_field(
-        name="📊 `/toootsoo`  —  Өдрийн тооцоо бүртгэх",
+        name="🧮 `/haalt`  —  Ээлжийн хаалт / тооцоо бүртгэх",
         value=(
-            "`shift` — 🌅 Өглөө эсвэл 🌙 Орой\n"
-            "→ Form гарч ирнэ: Ажилтан, Бэлэн, Карт, Зардал, Орлого\n"
+            "`eelj` — 🌅 Өдөр (09:00-19:00) эсвэл 🌙 Орой (19:00-09:00)\n"
+            "→ Form гарч ирнэ: Ажилтан, Бэлэн, Карт, Данс/Зардал, Тэмдэглэл\n"
+            "→ **Нийт** = Бэлэн + Карт + Данс + Зардал автоматаар бодогдоно\n"
             "→ Салбар бүрт тусдаа sheet tab үүснэ"
         ),
         inline=False
@@ -556,7 +609,7 @@ async def help_cmd(interaction: discord.Interaction):
         name="📌 Workflow",
         value=(
             "**Засвар:** `/shipment` → `/received` → `/fix` → `/return`\n"
-            "**Тооцоо:** өглөө/орой `/toootsoo`\n"
+            "**Тооцоо:** ээлж бүрийн төгсгөлд `/haalt`\n"
             "**Агуулах:** `/swap` — эвдэрсэн зүйл солих + автомат хасна"
         ),
         inline=False
@@ -566,6 +619,37 @@ async def help_cmd(interaction: discord.Interaction):
 
 
 # ── Events ────────────────────────────────────────────────────────────────────
+@client.event
+async def on_message(message: discord.Message):
+    """Салбарын суваг дотор энгийн текст бичихэд зөв командыг ашиглахыг сануулна."""
+    if message.author.bot or message.guild is None:
+        return
+
+    # Аль бүлгийн суваг вэ — тэр контекстэд тохирох командыг сануулна
+    if _is_haalt_here(message.channel):
+        reminder = (
+            "📌 Энэ суваг **ээлжийн хаалт**-д зориулагдсан.\n"
+            "Тооцоогоо бүртгэхдээ **`/haalt`** командыг ашиглаарай 🙏"
+        )
+    elif _is_repair_here(message.channel):
+        reminder = (
+            "📌 Энэ суваг **засварын бүртгэл**-д зориулагдсан.\n"
+            "Засварт явуулахдаа **`/shipment`** командыг ашиглаарай 🙏"
+        )
+    else:
+        return
+
+    now = time.time()
+    if now - _last_remind.get(message.channel.id, 0) < REMIND_COOLDOWN:
+        return
+    _last_remind[message.channel.id] = now
+
+    try:
+        await message.reply(reminder, delete_after=20, mention_author=False)
+    except discord.HTTPException:
+        pass
+
+
 @client.event
 async def on_ready():
     print(f"✅  Bot нэвтэрлээ: {client.user}")

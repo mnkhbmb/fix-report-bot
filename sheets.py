@@ -21,18 +21,22 @@ Shipments баганууд:
 
 import os
 import re
+import json
 from datetime import datetime
 from typing import Optional
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-import os
-from dotenv import load_dotenv  # ← нэмнэ
+from dotenv import load_dotenv
 
-load_dotenv()  # ← нэмнэ
+load_dotenv()
 
 
 SCOPES     = ["https://www.googleapis.com/auth/spreadsheets"]
+# Засварын бүртгэл (Repairs / Fixed / Shipments)
 SHEET_ID   = os.environ["GOOGLE_SHEET_ID"]
+# Тооцоо/Хаалт + Агуулах + Солилт — тусдаа spreadsheet.
+# Тохируулаагүй бол засварын sheet-тэй ижил болж буцна.
+REPORT_SHEET_ID = os.environ.get("GOOGLE_REPORT_SHEET_ID", SHEET_ID)
 CREDS_FILE = os.environ.get("GOOGLE_CREDS_FILE", "credentials.json")
 
 TAB_REP = "Repairs"
@@ -59,9 +63,9 @@ SHP_HEADERS = [
     "Статус", "Хүлээж авсан хүн", "Хүлээж авсан огноо", "Тайлбар"
 ]
 TOO_HEADERS = [
-    "Огноо", "Салбар", "Ээлж", "Ажилтан",
-    "Бэлэн", "Карт", "Зардал", "Зардлын задаргаа",
-    "Орлого", "Орлогын задаргаа", "Нийт", "Бүртгэсэн"
+    "Огноо", "Салбар", "Ээлж", "Цаг", "Ажилтан",
+    "Бэлэн", "Карт", "Данс", "Зардал", "Тэмдэглэл",
+    "Нийт", "Бүртгэсэн"
 ]
 AGU_HEADERS = ["Зүйл", "Тоо", "Сүүлд шинэчилсэн", "Тэмдэглэл"]
 SWAP_HEADERS = ["Огноо", "Салбар", "Зүйл", "Тоо", "Шалтгаан", "Бүртгэсэн"]
@@ -75,8 +79,8 @@ F_ID, F_SHP, F_BRANCH, F_ITEM, F_QTY, F_BY, F_DATE, F_FIX_BY, F_FIX_DATE, F_NOTE
 # Shipments баганы индекс
 S_ID, S_BRANCH, S_BY, S_DATE, S_STATUS, S_REC_BY, S_REC_DATE, S_NOTES = range(8)
 
-# Toootsoo баганы индекс
-T_DATE, T_BRANCH, T_SHIFT, T_WORKER, T_CASH, T_CARD, T_EXP, T_EXP_DETAIL, T_INC, T_INC_DETAIL, T_TOTAL, T_BY = range(12)
+# Toootsoo (Хаалт) баганы индекс
+T_DATE, T_BRANCH, T_SHIFT, T_TIME, T_WORKER, T_CASH, T_CARD, T_DANS, T_ZARDAL, T_NOTES, T_TOTAL, T_BY = range(12)
 
 # Агуулах баганы индекс
 A_ITEM, A_QTY, A_UPDATED, A_NOTES = range(4)
@@ -91,7 +95,13 @@ def _safe(row: list, idx: int) -> str:
 
 class SheetsClient:
     def __init__(self):
-        creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
+        # Railway/cloud дээр файл биш, GOOGLE_CREDS_JSON env var-аас уншина.
+        creds_json = os.environ.get("GOOGLE_CREDS_JSON")
+        if creds_json:
+            info = json.loads(creds_json)
+            creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+        else:
+            creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
         svc = build("sheets", "v4", credentials=creds)
         self.svc = svc.spreadsheets()
         self._ensure_tabs()
@@ -99,11 +109,10 @@ class SheetsClient:
     # ── Дотоод тусламж ────────────────────────────────────────────────────────
 
     def _ensure_tabs(self):
+        # Засварын sheet — Repairs / Fixed / Shipments
         meta = self.svc.get(spreadsheetId=SHEET_ID).execute()
         existing = {s["properties"]["title"] for s in meta["sheets"]}
-        new_tabs = [
-            t for t in [TAB_REP, TAB_FIX, TAB_SHP, TAB_SWAP] if t not in existing
-        ]
+        new_tabs = [t for t in [TAB_REP, TAB_FIX, TAB_SHP] if t not in existing]
         if new_tabs:
             self.svc.batchUpdate(
                 spreadsheetId=SHEET_ID,
@@ -112,70 +121,70 @@ class SheetsClient:
                 ]}
             ).execute()
         for tab, headers in [
-            (TAB_REP, REP_HEADERS), (TAB_FIX, FIX_HEADERS),
-            (TAB_SHP, SHP_HEADERS), (TAB_SWAP, SWAP_HEADERS)
+            (TAB_REP, REP_HEADERS), (TAB_FIX, FIX_HEADERS), (TAB_SHP, SHP_HEADERS)
         ]:
             self._ensure_header(tab, headers)
 
-    def _ensure_tab(self, tab: str, headers: list):
+    def _ensure_tab(self, tab: str, headers: list, sheet_id: str = SHEET_ID):
         """Tab байхгүй бол үүсгэнэ, толгойг шалгана."""
-        meta = self.svc.get(spreadsheetId=SHEET_ID).execute()
+        meta = self.svc.get(spreadsheetId=sheet_id).execute()
         existing = {s["properties"]["title"] for s in meta["sheets"]}
         if tab not in existing:
             self.svc.batchUpdate(
-                spreadsheetId=SHEET_ID,
+                spreadsheetId=sheet_id,
                 body={"requests": [{"addSheet": {"properties": {"title": tab}}}]}
             ).execute()
-        self._ensure_header(tab, headers)
+        self._ensure_header(tab, headers, sheet_id)
 
-    def _ensure_header(self, tab: str, headers: list):
-        rows = self._get_rows(tab)
+    def _ensure_header(self, tab: str, headers: list, sheet_id: str = SHEET_ID):
+        rows = self._get_rows(tab, sheet_id)
         if not rows or rows[0] != headers:
             self.svc.values().update(
-                spreadsheetId=SHEET_ID,
+                spreadsheetId=sheet_id,
                 range=f"{tab}!A1",
                 valueInputOption="RAW",
                 body={"values": [headers]}
             ).execute()
 
-    def _get_rows(self, tab: str) -> list:
+    def _get_rows(self, tab: str, sheet_id: str = SHEET_ID) -> list:
         result = self.svc.values().get(
-            spreadsheetId=SHEET_ID,
+            spreadsheetId=sheet_id,
             range=f"{tab}!A:Z"
         ).execute()
         return result.get("values", [])
 
-    def _append_row(self, tab: str, row: list):
+    def _append_row(self, tab: str, row: list, sheet_id: str = SHEET_ID):
         self.svc.values().append(
-            spreadsheetId=SHEET_ID,
+            spreadsheetId=sheet_id,
             range=f"{tab}!A:A",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": [row]}
         ).execute()
 
-    def _update_cell(self, tab: str, row_num: int, col: str, value: str):
+    def _update_cell(self, tab: str, row_num: int, col: str, value: str,
+                     sheet_id: str = SHEET_ID):
         self.svc.values().update(
-            spreadsheetId=SHEET_ID,
+            spreadsheetId=sheet_id,
             range=f"{tab}!{col}{row_num}",
             valueInputOption="RAW",
             body={"values": [[value]]}
         ).execute()
 
-    def _delete_row(self, tab: str, row_num: int):
+    def _delete_row(self, tab: str, row_num: int, sheet_id: str = SHEET_ID):
         """Sheet-ийн тухайн мөрийг устгана (1-based)."""
-        meta = self.svc.get(spreadsheetId=SHEET_ID).execute()
-        sheet_id = next(
+        meta = self.svc.get(spreadsheetId=sheet_id).execute()
+        sheet_gid = next(
             s["properties"]["sheetId"]
             for s in meta["sheets"]
             if s["properties"]["title"] == tab
         )
         self.svc.batchUpdate(
-            spreadsheetId=SHEET_ID,
+            spreadsheetId=sheet_id,
             body={"requests": [{
                 "deleteDimension": {
                     "range": {
-                        "sheetId": sheet_id,
+                        "sheetId": sheet_gid,
                         "dimension": "ROWS",
                         "startIndex": row_num - 1,   # 0-based
                         "endIndex":   row_num         # exclusive
@@ -205,9 +214,10 @@ class SheetsClient:
 
         return f"{prefix}-{(max_n + 1):04d}"
 
-    def _find_row(self, tab: str, col_idx: int, value: str) -> Optional[int]:
+    def _find_row(self, tab: str, col_idx: int, value: str,
+                  sheet_id: str = SHEET_ID) -> Optional[int]:
         """Тухайн утгатай мөрийн дугаарыг буцаана (1-based)."""
-        rows = self._get_rows(tab)
+        rows = self._get_rows(tab, sheet_id)
         for i, row in enumerate(rows):
             if len(row) > col_idx and row[col_idx] == value:
                 return i + 1
@@ -430,8 +440,8 @@ class SheetsClient:
     def get_aguulakh(self, branch: str) -> list[dict]:
         """Тухайн салбарын агуулах дахь бүх зүйлс."""
         tab = f"{AGU_PREFIX}{branch}"
-        self._ensure_tab(tab, AGU_HEADERS)
-        rows = self._get_rows(tab)
+        self._ensure_tab(tab, AGU_HEADERS, REPORT_SHEET_ID)
+        rows = self._get_rows(tab, REPORT_SHEET_ID)
         result = []
         for row in rows[1:]:
             if not row or not _safe(row, A_ITEM):
@@ -456,8 +466,8 @@ class SheetsClient:
         Зүйл байхгүй бол шинээр үүсгэнэ.
         """
         tab = f"{AGU_PREFIX}{branch}"
-        self._ensure_tab(tab, AGU_HEADERS)
-        rows = self._get_rows(tab)
+        self._ensure_tab(tab, AGU_HEADERS, REPORT_SHEET_ID)
+        rows = self._get_rows(tab, REPORT_SHEET_ID)
         now = _now()
 
         for i, row in enumerate(rows[1:], start=2):
@@ -467,15 +477,15 @@ class SheetsClient:
                 except ValueError:
                     cur = 0
                 new_qty = max(0, cur + delta)
-                self._update_cell(tab, i, "B", str(new_qty))
-                self._update_cell(tab, i, "C", now)
+                self._update_cell(tab, i, "B", str(new_qty), REPORT_SHEET_ID)
+                self._update_cell(tab, i, "C", now, REPORT_SHEET_ID)
                 if notes:
-                    self._update_cell(tab, i, "D", notes)
+                    self._update_cell(tab, i, "D", notes, REPORT_SHEET_ID)
                 return {"item": item, "old_qty": cur, "new_qty": new_qty, "created": False}
 
         # Шинэ зүйл
         new_qty = max(0, delta)
-        self._append_row(tab, [item, str(new_qty), now, notes])
+        self._append_row(tab, [item, str(new_qty), now, notes], REPORT_SHEET_ID)
         return {"item": item, "old_qty": 0, "new_qty": new_qty, "created": True}
 
     def record_swap(self, branch: str, item: str, qty: int,
@@ -485,9 +495,10 @@ class SheetsClient:
         """
         adj = self.adjust_stock(branch, item, -qty)
         today = datetime.now().strftime("%Y-%m-%d")
+        self._ensure_tab(TAB_SWAP, SWAP_HEADERS, REPORT_SHEET_ID)
         self._append_row(TAB_SWAP, [
             today, branch, item, str(qty), reason, recorded_by
-        ])
+        ], REPORT_SHEET_ID)
         return {
             "date":    today,
             "branch":  branch,
@@ -497,46 +508,37 @@ class SheetsClient:
             "remaining": adj["new_qty"]
         }
 
-    # ── Тооцоо ────────────────────────────────────────────────────────────────
+    # ── Тооцоо / Хаалт ─────────────────────────────────────────────────────────
 
-    def add_toootsoo(self, branch: str, shift: str, worker: str,
-                     cash: int, card: int,
-                     expenses: list[dict], incomes: list[dict],
-                     reported_by: str) -> dict:
+    def add_haalt(self, branch: str, shift: str, time_range: str, worker: str,
+                  cash: int, card: int, dans: int, zardal: int,
+                  notes: str, reported_by: str) -> dict:
         """
-        Өдрийн тооцоо бүртгэнэ.
-        expenses/incomes — [{"desc": "Нацагаа цаг", "amount": 3500}, ...]
-        Нийт = Бэлэн + Карт + Зардал (зардал бэлэн дотроос гарсан тул нэмж тооцно)
+        Ээлжийн хаалт (тооцоо) бүртгэнэ. Салбар бүрд тусдаа tab.
+        Нийт = Бэлэн + Карт + Данс + Зардал
+        (зардал бэлэн дотроос гарсан тул нийт орлогод эргүүлж нэмж тооцно)
         """
-        total_exp = sum(e["amount"] for e in expenses)
-        total_inc = sum(i["amount"] for i in incomes)
-        net_total = cash + card + total_exp - total_inc
-
-        exp_detail = ", ".join(f"{e['desc']} {e['amount']}" for e in expenses)
-        inc_detail = ", ".join(f"{i['desc']} {i['amount']}" for i in incomes)
+        net_total = cash + card + dans + zardal
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # Салбар бүрд тусдаа tab
         tab = f"{TOO_PREFIX}{branch}"
-        self._ensure_tab(tab, TOO_HEADERS)
+        self._ensure_tab(tab, TOO_HEADERS, REPORT_SHEET_ID)
         self._append_row(tab, [
-            today, branch, shift, worker,
-            str(cash), str(card),
-            str(total_exp), exp_detail,
-            str(total_inc), inc_detail,
+            today, branch, shift, time_range, worker,
+            str(cash), str(card), str(dans), str(zardal), notes,
             str(net_total), reported_by
-        ])
+        ], REPORT_SHEET_ID)
 
         return {
-            "date":       today,
-            "branch":     branch,
-            "shift":      shift,
-            "worker":     worker,
-            "cash":       cash,
-            "card":       card,
-            "expenses":   expenses,
-            "incomes":    incomes,
-            "total_exp":  total_exp,
-            "total_inc":  total_inc,
-            "net_total":  net_total
+            "date":      today,
+            "branch":    branch,
+            "shift":     shift,
+            "time":      time_range,
+            "worker":    worker,
+            "cash":      cash,
+            "card":      card,
+            "dans":      dans,
+            "zardal":    zardal,
+            "notes":     notes,
+            "net_total": net_total
         }
