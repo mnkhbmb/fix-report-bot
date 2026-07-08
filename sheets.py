@@ -23,6 +23,7 @@ import os
 import re
 import json
 import base64
+import calendar
 from datetime import datetime
 from typing import Optional
 from google.oauth2.service_account import Credentials
@@ -64,9 +65,8 @@ SHP_HEADERS = [
     "Статус", "Хүлээж авсан хүн", "Хүлээж авсан огноо", "Тайлбар"
 ]
 TOO_HEADERS = [
-    "Огноо", "Салбар", "Ээлж", "Ажилтан",
-    "Бэлэн мөнгө", "Зардал", "Mobile qpay", "Карт данс",
-    "Нийт орлого", "Бүртгэсэн"
+    "Огноо", "Ажилтан", "Бэлэн мөнгө", "Зардал",
+    "Mobile qpay", "Карт данс", "Нийт орлого", "Бүртгэсэн"
 ]
 AGU_HEADERS = ["Зүйл", "Тоо", "Сүүлд шинэчилсэн", "Тэмдэглэл"]
 SWAP_HEADERS = ["Огноо", "Салбар", "Зүйл", "Тоо", "Шалтгаан", "Бүртгэсэн"]
@@ -80,8 +80,8 @@ F_ID, F_SHP, F_BRANCH, F_ITEM, F_QTY, F_BY, F_DATE, F_FIX_BY, F_FIX_DATE, F_NOTE
 # Shipments баганы индекс
 S_ID, S_BRANCH, S_BY, S_DATE, S_STATUS, S_REC_BY, S_REC_DATE, S_NOTES = range(8)
 
-# Toootsoo (Хаалт) баганы индекс
-T_DATE, T_BRANCH, T_SHIFT, T_WORKER, T_CASH, T_ZARDAL, T_QPAY, T_KART, T_TOTAL, T_BY = range(10)
+# Toootsoo (Хаалт) баганы индекс — ээлж бүр тусдаа tab, салбар нь tab нэрэнд
+T_DATE, T_WORKER, T_CASH, T_ZARDAL, T_QPAY, T_KART, T_TOTAL, T_BY = range(8)
 
 # Агуулах баганы индекс
 A_ITEM, A_QTY, A_UPDATED, A_NOTES = range(4)
@@ -527,24 +527,59 @@ class SheetsClient:
 
     # ── Тооцоо / Хаалт ─────────────────────────────────────────────────────────
 
+    def _seed_month(self, tab: str, dt: datetime):
+        """Тухайн сарын өдрүүдийг (1..30/31) Огноо баганад урьдчилж мөрлөнө."""
+        ndays = calendar.monthrange(dt.year, dt.month)[1]
+        rows = [[f"{dt.year}.{dt.month}.{d}"] for d in range(1, ndays + 1)]
+        self.svc.values().append(
+            spreadsheetId=REPORT_SHEET_ID,
+            range=f"{tab}!A:A",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": rows}
+        ).execute()
+
+    def _update_row(self, tab: str, row_num: int, values: list, sheet_id: str = SHEET_ID):
+        end_col = chr(ord("A") + len(values) - 1)   # ponytail: <=26 багана
+        self.svc.values().update(
+            spreadsheetId=sheet_id,
+            range=f"{tab}!A{row_num}:{end_col}{row_num}",
+            valueInputOption="RAW",
+            body={"values": [values]}
+        ).execute()
+
     def add_haalt(self, branch: str, shift: str, worker: str,
                   cash: int, zardal: int, qpay: int, kart: int,
                   reported_by: str) -> dict:
         """
-        Ээлжийн хаалт (тооцоо) бүртгэнэ. Салбар бүрд тусдаа tab.
+        Ээлжийн хаалт (тооцоо) бүртгэнэ. Ээлж бүр тусдаа tab: 'Тооцоо-{салбар}-{ээлж}'.
+        Эхний бичилтэд (tab хоосон) тухайн сарын өдрүүдийг урьдчилж мөрлөнө.
+        Хаалт нь өдрийнхөө мөрөнд бичигдэнэ (байхгүй бол нэмнэ).
         Нийт орлого = Бэлэн мөнгө + Карт данс (нягтлангийн sheet-тэй адил).
-        Зардал, Mobile qpay нь тусдаа баганад бүртгэгдэнэ.
         """
         net_total = cash + kart
-        today = datetime.now().strftime("%Y-%m-%d")
+        now = datetime.now()
+        today = f"{now.year}.{now.month}.{now.day}"
 
-        tab = f"{TOO_PREFIX}{branch}"
+        tab = f"{TOO_PREFIX}{branch}-{shift}"
         self._ensure_tab(tab, TOO_HEADERS, REPORT_SHEET_ID)
-        self._append_row(tab, [
-            today, branch, shift, worker,
-            str(cash), str(zardal), str(qpay), str(kart),
-            str(net_total), reported_by
-        ], REPORT_SHEET_ID)
+
+        rows = self._get_rows(tab, REPORT_SHEET_ID)
+        if len(rows) <= 1:   # зөвхөн толгой → шинэ сар, өдрүүдээр дүүргэнэ
+            self._seed_month(tab, now)
+            rows = self._get_rows(tab, REPORT_SHEET_ID)
+
+        values = [today, worker, str(cash), str(zardal),
+                  str(qpay), str(kart), str(net_total), reported_by]
+
+        row_num = next(
+            (i for i, r in enumerate(rows[1:], start=2) if _safe(r, T_DATE) == today),
+            None
+        )
+        if row_num:
+            self._update_row(tab, row_num, values, REPORT_SHEET_ID)
+        else:
+            self._append_row(tab, values, REPORT_SHEET_ID)
 
         return {
             "date":      today,
