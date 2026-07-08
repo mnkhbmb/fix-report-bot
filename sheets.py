@@ -64,7 +64,7 @@ SHP_HEADERS = [
     "Статус", "Хүлээж авсан хүн", "Хүлээж авсан огноо", "Тайлбар"
 ]
 TOO_HEADERS = [
-    "Огноо", "Салбар", "Ээлж", "Цаг", "Ажилтан",
+    "Огноо", "Салбар", "Ээлж", "Ажилтан",
     "Бэлэн", "Карт", "Данс", "Зардал", "Зардлын задаргаа",
     "Нийт", "Бүртгэсэн"
 ]
@@ -81,7 +81,7 @@ F_ID, F_SHP, F_BRANCH, F_ITEM, F_QTY, F_BY, F_DATE, F_FIX_BY, F_FIX_DATE, F_NOTE
 S_ID, S_BRANCH, S_BY, S_DATE, S_STATUS, S_REC_BY, S_REC_DATE, S_NOTES = range(8)
 
 # Toootsoo (Хаалт) баганы индекс
-T_DATE, T_BRANCH, T_SHIFT, T_TIME, T_WORKER, T_CASH, T_CARD, T_DANS, T_ZARDAL, T_NOTES, T_TOTAL, T_BY = range(12)
+T_DATE, T_BRANCH, T_SHIFT, T_WORKER, T_CASH, T_CARD, T_DANS, T_ZARDAL, T_NOTES, T_TOTAL, T_BY = range(11)
 
 # Агуулах баганы индекс
 A_ITEM, A_QTY, A_UPDATED, A_NOTES = range(4)
@@ -527,7 +527,7 @@ class SheetsClient:
 
     # ── Тооцоо / Хаалт ─────────────────────────────────────────────────────────
 
-    def add_haalt(self, branch: str, shift: str, time_range: str, worker: str,
+    def add_haalt(self, branch: str, shift: str, worker: str,
                   cash: int, card: int, dans: int, zardal: int,
                   notes: str, reported_by: str) -> dict:
         """
@@ -541,7 +541,7 @@ class SheetsClient:
         tab = f"{TOO_PREFIX}{branch}"
         self._ensure_tab(tab, TOO_HEADERS, REPORT_SHEET_ID)
         self._append_row(tab, [
-            today, branch, shift, time_range, worker,
+            today, branch, shift, worker,
             str(cash), str(card), str(dans), str(zardal), notes,
             str(net_total), reported_by
         ], REPORT_SHEET_ID)
@@ -550,7 +550,6 @@ class SheetsClient:
             "date":      today,
             "branch":    branch,
             "shift":     shift,
-            "time":      time_range,
             "worker":    worker,
             "cash":      cash,
             "card":      card,

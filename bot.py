@@ -410,14 +410,8 @@ async def swap_cmd(interaction: discord.Interaction, item: str, qty: int, reason
 # ═══════════════════════════════════════════════════════════════════════════════
 #  /haalt  — Ээлжийн хаалт / тооцоо (Modal form)
 # ═══════════════════════════════════════════════════════════════════════════════
-# Ээлж бүрийн цагийн интервал
-SHIFT_TIMES = {
-    "Өдөр": "09:00-19:00",
-    "Орой": "19:00-09:00",
-    "Бүтэн гараа": "",   # цаг бичихгүй
-}
 SHIFT_EMOJI = {
-    "Өдөр": "🌅",
+    "Өглөө": "🌅",
     "Орой": "🌙",
     "Бүтэн гараа": "🌗",
 }
@@ -436,59 +430,50 @@ def _parse_int(raw: str) -> int:
 
 
 class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
-    def __init__(self, branch: str, shift: str, worker: str):
+    def __init__(self, branch: str, shift: str):
         super().__init__()
         self.branch = branch
         self.shift  = shift
-        self.worker = worker
-        self.time_range = SHIFT_TIMES.get(shift, "")
 
+    worker = ui.TextInput(
+        label="Ажилтны нэр", required=True, max_length=50
+    )
     cash = ui.TextInput(
-        label="Бэлэн (₮)",
-        placeholder="жш: 80000",
-        required=True, max_length=15
+        label="Бэлэн (₮)", required=True, max_length=15
     )
     card = ui.TextInput(
-        label="Карт (₮)",
-        placeholder="жш: 562450",
-        required=True, max_length=15
+        label="Карт (₮)", required=True, max_length=15
     )
-    dans = ui.TextInput(
-        label="Данс (₮)",
-        placeholder="жш: 0",
-        required=False, max_length=15, default="0"
-    )
-    zardal = ui.TextInput(
-        label="Зардал (₮)",
-        placeholder="жш: 40000",
-        required=False, max_length=15, default="0"
+    dans_zardal = ui.TextInput(
+        label="Данс / Зардал (₮)",
+        required=False, max_length=40, default="0 / 0"
     )
     notes = ui.TextInput(
         label="Зардлын задаргаа (заавал биш)",
-        placeholder="жш: баллонтой ус - 8800",
         required=False, style=discord.TextStyle.paragraph, max_length=500
     )
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
 
-        cash_n   = _parse_int(self.cash.value)
-        card_n   = _parse_int(self.card.value)
-        dans_n   = _parse_int(self.dans.value)
-        zardal_n = _parse_int(self.zardal.value)
+        cash_n = _parse_int(self.cash.value)
+        card_n = _parse_int(self.card.value)
+        # "0 / 40000" → данс=0, зардал=40000
+        parts = re.split(r"[/|]", self.dans_zardal.value or "")
+        dans_n   = _parse_int(parts[0]) if len(parts) > 0 else 0
+        zardal_n = _parse_int(parts[1]) if len(parts) > 1 else 0
 
         result = client.sheets.add_haalt(
-            branch=self.branch, shift=self.shift, time_range=self.time_range,
-            worker=self.worker.strip(),
+            branch=self.branch, shift=self.shift,
+            worker=self.worker.value.strip(),
             cash=cash_n, card=card_n, dans=dans_n, zardal=zardal_n,
             notes=(self.notes.value or "").strip(),
             reported_by=str(interaction.user)
         )
 
         shift_emoji = SHIFT_EMOJI.get(self.shift, "🕘")
-        shift_label = f"{self.shift} /{self.time_range}/" if self.time_range else self.shift
         embed = discord.Embed(
-            title=f"{shift_emoji} {result['date']} — {shift_label}",
+            title=f"{shift_emoji} {result['date']} — {self.shift}",
             description=f"**{self.branch}** · {result['worker']}",
             color=0x2ECC71
         )
@@ -513,14 +498,13 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
 
 
 @client.tree.command(name="haalt", description="Ээлжийн хаалт / тооцоо бүртгэх (form гарч ирнэ)")
-@app_commands.describe(eelj="Ээлж сонгоно уу", ajiltan="Ажилтны нэр")
+@app_commands.describe(eelj="Ээлж сонгоно уу")
 @app_commands.choices(eelj=[
-    app_commands.Choice(name="🌅 Өдөр (09:00-19:00)", value="Өдөр"),
-    app_commands.Choice(name="🌙 Орой (19:00-09:00)", value="Орой"),
+    app_commands.Choice(name="🌅 Өглөө", value="Өглөө"),
+    app_commands.Choice(name="🌙 Орой", value="Орой"),
     app_commands.Choice(name="🌗 Бүтэн гараа", value="Бүтэн гараа"),
 ])
-async def haalt_cmd(interaction: discord.Interaction,
-                    eelj: app_commands.Choice[str], ajiltan: str):
+async def haalt_cmd(interaction: discord.Interaction, eelj: app_commands.Choice[str]):
     # Зөвхөн тооцооны бүлгийн (category) сувгуудад зөвшөөрнө
     if HAALT_CATEGORY_ID is not None and not _is_haalt_here(interaction.channel):
         return await interaction.response.send_message(
@@ -528,7 +512,7 @@ async def haalt_cmd(interaction: discord.Interaction,
 
     # Channel нэрийг салбар болгоно
     branch = interaction.channel.name
-    modal = HaaltModal(branch=branch, shift=eelj.value, worker=ajiltan)
+    modal = HaaltModal(branch=branch, shift=eelj.value)
     await interaction.response.send_modal(modal)
 
 
@@ -594,9 +578,8 @@ async def help_cmd(interaction: discord.Interaction):
     embed.add_field(
         name="🧮 `/haalt`  —  Ээлжийн хаалт / тооцоо бүртгэх",
         value=(
-            "`eelj` — 🌅 Өдөр (09:00-19:00) эсвэл 🌙 Орой (19:00-09:00)\n"
-            "`ajiltan` — Ажилтны нэр\n"
-            "→ Form гарч ирнэ: Бэлэн, Карт, Данс, Зардал, Зардлын задаргаа\n"
+            "`eelj` — 🌅 Өглөө / 🌙 Орой / 🌗 Бүтэн гараа\n"
+            "→ Form гарч ирнэ: Ажилтан, Бэлэн, Карт, Данс/Зардал, Зардлын задаргаа\n"
             "→ **Нийт** = Бэлэн + Карт + Данс + Зардал автоматаар бодогдоно\n"
             "→ Салбар бүрт тусдаа sheet tab үүснэ"
         ),
