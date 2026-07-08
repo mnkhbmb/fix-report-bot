@@ -439,35 +439,30 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
         label="Ажилтны нэр", required=True, max_length=50
     )
     cash = ui.TextInput(
-        label="Бэлэн (₮)", required=True, max_length=15
+        label="Бэлэн мөнгө (₮)", required=True, max_length=15
     )
-    card = ui.TextInput(
-        label="Карт (₮)", required=True, max_length=15
+    kart = ui.TextInput(
+        label="Карт данс (₮)", required=True, max_length=15
     )
-    dans_zardal = ui.TextInput(
-        label="Данс / Зардал (₮)",
-        required=False, max_length=40, default="0 / 0"
+    zardal = ui.TextInput(
+        label="Зардал (₮)", required=False, max_length=15, default="0"
     )
-    notes = ui.TextInput(
-        label="Зардлын задаргаа (заавал биш)",
-        required=False, style=discord.TextStyle.paragraph, max_length=500
+    qpay = ui.TextInput(
+        label="Mobile qpay (₮)", required=False, max_length=15, default="0"
     )
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
 
-        cash_n = _parse_int(self.cash.value)
-        card_n = _parse_int(self.card.value)
-        # "0 / 40000" → данс=0, зардал=40000
-        parts = re.split(r"[/|]", self.dans_zardal.value or "")
-        dans_n   = _parse_int(parts[0]) if len(parts) > 0 else 0
-        zardal_n = _parse_int(parts[1]) if len(parts) > 1 else 0
+        cash_n   = _parse_int(self.cash.value)
+        kart_n   = _parse_int(self.kart.value)
+        zardal_n = _parse_int(self.zardal.value)
+        qpay_n   = _parse_int(self.qpay.value)
 
         result = client.sheets.add_haalt(
             branch=self.branch, shift=self.shift,
             worker=self.worker.value.strip(),
-            cash=cash_n, card=card_n, dans=dans_n, zardal=zardal_n,
-            notes=(self.notes.value or "").strip(),
+            cash=cash_n, zardal=zardal_n, qpay=qpay_n, kart=kart_n,
             reported_by=str(interaction.user)
         )
 
@@ -479,19 +474,16 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
         )
 
         lines = [
-            f"**Бэлэн** — `{cash_n:,}₮`",
-            f"**Карт**  — `{card_n:,}₮`",
+            f"**Бэлэн мөнгө** — `{cash_n:,}₮`",
+            f"**Карт данс**  — `{kart_n:,}₮`",
         ]
-        if dans_n:
-            lines.append(f"**Данс**  — `{dans_n:,}₮`")
+        if qpay_n:
+            lines.append(f"**Mobile qpay** — `{qpay_n:,}₮`")
         if zardal_n:
             lines.append(f"**Зардал** — `{zardal_n:,}₮`")
         lines.append("━━━━━━━━━━━━━━━━━")
-        lines.append(f"**🧮 Нийт** — `{result['net_total']:,}₮`")
+        lines.append(f"**🧮 Нийт орлого** — `{result['net_total']:,}₮`")
         embed.add_field(name="💰 Дүн", value="\n".join(lines), inline=False)
-
-        if result["notes"]:
-            embed.add_field(name="📝 Зардлын задаргаа", value=result["notes"], inline=False)
         embed.set_footer(text=f"Бүртгэсэн: {interaction.user}")
 
         await interaction.followup.send(embed=embed)
@@ -579,8 +571,8 @@ async def help_cmd(interaction: discord.Interaction):
         name="🧮 `/haalt`  —  Ээлжийн хаалт / тооцоо бүртгэх",
         value=(
             "`eelj` — 🌅 Өглөө / 🌙 Орой / 🌗 Бүтэн гараа\n"
-            "→ Form гарч ирнэ: Ажилтан, Бэлэн, Карт, Данс/Зардал, Зардлын задаргаа\n"
-            "→ **Нийт** = Бэлэн + Карт + Данс + Зардал автоматаар бодогдоно\n"
+            "→ Form: Ажилтан, Бэлэн мөнгө, Карт данс, Зардал, Mobile qpay\n"
+            "→ **Нийт орлого** = Бэлэн мөнгө + Карт данс автоматаар бодогдоно\n"
             "→ Салбар бүрт тусдаа sheet tab үүснэ"
         ),
         inline=False

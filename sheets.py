@@ -65,8 +65,8 @@ SHP_HEADERS = [
 ]
 TOO_HEADERS = [
     "Огноо", "Салбар", "Ээлж", "Ажилтан",
-    "Бэлэн", "Карт", "Данс", "Зардал", "Зардлын задаргаа",
-    "Нийт", "Бүртгэсэн"
+    "Бэлэн мөнгө", "Зардал", "Mobile qpay", "Карт данс",
+    "Нийт орлого", "Бүртгэсэн"
 ]
 AGU_HEADERS = ["Зүйл", "Тоо", "Сүүлд шинэчилсэн", "Тэмдэглэл"]
 SWAP_HEADERS = ["Огноо", "Салбар", "Зүйл", "Тоо", "Шалтгаан", "Бүртгэсэн"]
@@ -81,7 +81,7 @@ F_ID, F_SHP, F_BRANCH, F_ITEM, F_QTY, F_BY, F_DATE, F_FIX_BY, F_FIX_DATE, F_NOTE
 S_ID, S_BRANCH, S_BY, S_DATE, S_STATUS, S_REC_BY, S_REC_DATE, S_NOTES = range(8)
 
 # Toootsoo (Хаалт) баганы индекс
-T_DATE, T_BRANCH, T_SHIFT, T_WORKER, T_CASH, T_CARD, T_DANS, T_ZARDAL, T_NOTES, T_TOTAL, T_BY = range(11)
+T_DATE, T_BRANCH, T_SHIFT, T_WORKER, T_CASH, T_ZARDAL, T_QPAY, T_KART, T_TOTAL, T_BY = range(10)
 
 # Агуулах баганы индекс
 A_ITEM, A_QTY, A_UPDATED, A_NOTES = range(4)
@@ -528,21 +528,21 @@ class SheetsClient:
     # ── Тооцоо / Хаалт ─────────────────────────────────────────────────────────
 
     def add_haalt(self, branch: str, shift: str, worker: str,
-                  cash: int, card: int, dans: int, zardal: int,
-                  notes: str, reported_by: str) -> dict:
+                  cash: int, zardal: int, qpay: int, kart: int,
+                  reported_by: str) -> dict:
         """
         Ээлжийн хаалт (тооцоо) бүртгэнэ. Салбар бүрд тусдаа tab.
-        Нийт = Бэлэн + Карт + Данс + Зардал
-        (зардал бэлэн дотроос гарсан тул нийт орлогод эргүүлж нэмж тооцно)
+        Нийт орлого = Бэлэн мөнгө + Карт данс (нягтлангийн sheet-тэй адил).
+        Зардал, Mobile qpay нь тусдаа баганад бүртгэгдэнэ.
         """
-        net_total = cash + card + dans + zardal
+        net_total = cash + kart
         today = datetime.now().strftime("%Y-%m-%d")
 
         tab = f"{TOO_PREFIX}{branch}"
         self._ensure_tab(tab, TOO_HEADERS, REPORT_SHEET_ID)
         self._append_row(tab, [
             today, branch, shift, worker,
-            str(cash), str(card), str(dans), str(zardal), notes,
+            str(cash), str(zardal), str(qpay), str(kart),
             str(net_total), reported_by
         ], REPORT_SHEET_ID)
 
@@ -552,9 +552,8 @@ class SheetsClient:
             "shift":     shift,
             "worker":    worker,
             "cash":      cash,
-            "card":      card,
-            "dans":      dans,
             "zardal":    zardal,
-            "notes":     notes,
+            "qpay":      qpay,
+            "kart":      kart,
             "net_total": net_total
         }
