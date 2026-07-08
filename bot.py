@@ -430,14 +430,12 @@ def _parse_int(raw: str) -> int:
 
 
 class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
-    def __init__(self, branch: str, shift: str):
+    def __init__(self, branch: str, shift: str, worker: str):
         super().__init__()
         self.branch = branch
         self.shift  = shift
+        self.worker = worker
 
-    worker = ui.TextInput(
-        label="Ажилтны нэр", required=True, max_length=50
-    )
     cash = ui.TextInput(
         label="Бэлэн мөнгө (₮)", required=True, max_length=15
     )
@@ -450,6 +448,10 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
     qpay = ui.TextInput(
         label="Mobile qpay (₮)", required=False, max_length=15, default="0"
     )
+    notes = ui.TextInput(
+        label="Зардлын задаргаа (заавал биш)",
+        required=False, style=discord.TextStyle.paragraph, max_length=500
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -461,8 +463,9 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
 
         result = client.sheets.add_haalt(
             branch=self.branch, shift=self.shift,
-            worker=self.worker.value.strip(),
+            worker=self.worker.strip(),
             cash=cash_n, zardal=zardal_n, qpay=qpay_n, kart=kart_n,
+            notes=(self.notes.value or "").strip(),
             reported_by=str(interaction.user)
         )
 
@@ -484,19 +487,23 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
         lines.append("━━━━━━━━━━━━━━━━━")
         lines.append(f"**🧮 Нийт орлого** — `{result['net_total']:,}₮`")
         embed.add_field(name="💰 Дүн", value="\n".join(lines), inline=False)
+
+        if result.get("notes"):
+            embed.add_field(name="📝 Зардлын задаргаа", value=result["notes"], inline=False)
         embed.set_footer(text=f"Бүртгэсэн: {interaction.user}")
 
         await interaction.followup.send(embed=embed)
 
 
 @client.tree.command(name="haalt", description="Ээлжийн хаалт / тооцоо бүртгэх (form гарч ирнэ)")
-@app_commands.describe(eelj="Ээлж сонгоно уу")
+@app_commands.describe(eelj="Ээлж сонгоно уу", ajiltan="Ажилтны нэр")
 @app_commands.choices(eelj=[
     app_commands.Choice(name="🌅 Өглөө", value="Өглөө"),
     app_commands.Choice(name="🌙 Орой", value="Орой"),
     app_commands.Choice(name="🌗 Бүтэн гараа", value="Бүтэн гараа"),
 ])
-async def haalt_cmd(interaction: discord.Interaction, eelj: app_commands.Choice[str]):
+async def haalt_cmd(interaction: discord.Interaction,
+                    eelj: app_commands.Choice[str], ajiltan: str):
     # Зөвхөн тооцооны бүлгийн (category) сувгуудад зөвшөөрнө
     if HAALT_CATEGORY_ID is not None and not _is_haalt_here(interaction.channel):
         return await interaction.response.send_message(
@@ -504,7 +511,7 @@ async def haalt_cmd(interaction: discord.Interaction, eelj: app_commands.Choice[
 
     # Channel нэрийг салбар болгоно
     branch = interaction.channel.name
-    modal = HaaltModal(branch=branch, shift=eelj.value)
+    modal = HaaltModal(branch=branch, shift=eelj.value, worker=ajiltan)
     await interaction.response.send_modal(modal)
 
 
@@ -571,7 +578,8 @@ async def help_cmd(interaction: discord.Interaction):
         name="🧮 `/haalt`  —  Ээлжийн хаалт / тооцоо бүртгэх",
         value=(
             "`eelj` — 🌅 Өглөө / 🌙 Орой / 🌗 Бүтэн гараа\n"
-            "→ Form: Ажилтан, Бэлэн мөнгө, Карт данс, Зардал, Mobile qpay\n"
+            "`ajiltan` — Ажилтны нэр\n"
+            "→ Form: Бэлэн мөнгө, Карт данс, Зардал, Mobile qpay, Зардлын задаргаа\n"
             "→ **Нийт орлого** = Бэлэн мөнгө + Карт данс автоматаар бодогдоно\n"
             "→ Салбар бүрт тусдаа sheet tab үүснэ"
         ),

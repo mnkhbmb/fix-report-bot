@@ -65,7 +65,7 @@ SHP_HEADERS = [
     "Статус", "Хүлээж авсан хүн", "Хүлээж авсан огноо", "Тайлбар"
 ]
 TOO_HEADERS = [
-    "Огноо", "Ажилтан", "Бэлэн мөнгө", "Зардал",
+    "Огноо", "Ажилтан", "Бэлэн мөнгө", "Зардал", "Зардлын задаргаа",
     "Mobile qpay", "Карт данс", "Нийт орлого", "Бүртгэсэн"
 ]
 AGU_HEADERS = ["Зүйл", "Тоо", "Сүүлд шинэчилсэн", "Тэмдэглэл"]
@@ -81,7 +81,7 @@ F_ID, F_SHP, F_BRANCH, F_ITEM, F_QTY, F_BY, F_DATE, F_FIX_BY, F_FIX_DATE, F_NOTE
 S_ID, S_BRANCH, S_BY, S_DATE, S_STATUS, S_REC_BY, S_REC_DATE, S_NOTES = range(8)
 
 # Toootsoo (Хаалт) баганы индекс — ээлж бүр тусдаа tab, салбар нь tab нэрэнд
-T_DATE, T_WORKER, T_CASH, T_ZARDAL, T_QPAY, T_KART, T_TOTAL, T_BY = range(8)
+T_DATE, T_WORKER, T_CASH, T_ZARDAL, T_NOTES, T_QPAY, T_KART, T_TOTAL, T_BY = range(9)
 
 # Агуулах баганы индекс
 A_ITEM, A_QTY, A_UPDATED, A_NOTES = range(4)
@@ -550,7 +550,7 @@ class SheetsClient:
 
     def add_haalt(self, branch: str, shift: str, worker: str,
                   cash: int, zardal: int, qpay: int, kart: int,
-                  reported_by: str) -> dict:
+                  notes: str, reported_by: str) -> dict:
         """
         Ээлжийн хаалт (тооцоо) бүртгэнэ. Ээлж бүр тусдаа tab: 'Тооцоо-{салбар}-{ээлж}'.
         Эхний бичилтэд (tab хоосон) тухайн сарын өдрүүдийг урьдчилж мөрлөнө.
@@ -569,7 +569,7 @@ class SheetsClient:
             self._seed_month(tab, now)
             rows = self._get_rows(tab, REPORT_SHEET_ID)
 
-        values = [today, worker, str(cash), str(zardal),
+        values = [today, worker, str(cash), str(zardal), notes,
                   str(qpay), str(kart), str(net_total), reported_by]
 
         row_num = next(
@@ -590,5 +590,6 @@ class SheetsClient:
             "zardal":    zardal,
             "qpay":      qpay,
             "kart":      kart,
+            "notes":     notes,
             "net_total": net_total
         }
