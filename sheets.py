@@ -68,6 +68,8 @@ TOO_HEADERS = [
     "Огноо", "Ажилтан", "Бэлэн мөнгө", "Зардал", "Зардлын задаргаа",
     "Mobile qpay", "Карт данс", "Нийт орлого", "Бүртгэсэн"
 ]
+# Салбарт нэг tab, доор нь ээлж бүрийн блок дараалж (нягтлангийн зураг шиг)
+SHIFTS = ["Өглөө", "Орой", "Бүтэн гараа"]
 AGU_HEADERS = ["Зүйл", "Тоо", "Сүүлд шинэчилсэн", "Тэмдэглэл"]
 SWAP_HEADERS = ["Огноо", "Салбар", "Зүйл", "Тоо", "Шалтгаан", "Бүртгэсэн"]
 
@@ -527,16 +529,30 @@ class SheetsClient:
 
     # ── Тооцоо / Хаалт ─────────────────────────────────────────────────────────
 
+    def _ensure_sheet_exists(self, tab: str, sheet_id: str = SHEET_ID):
+        """Tab байхгүй бол зөвхөн үүсгэнэ (толгой бичихгүй)."""
+        meta = self.svc.get(spreadsheetId=sheet_id).execute()
+        existing = {s["properties"]["title"] for s in meta["sheets"]}
+        if tab not in existing:
+            self.svc.batchUpdate(
+                spreadsheetId=sheet_id,
+                body={"requests": [{"addSheet": {"properties": {"title": tab}}}]}
+            ).execute()
+
     def _seed_month(self, tab: str, dt: datetime):
-        """Тухайн сарын өдрүүдийг (1..30/31) Огноо баганад урьдчилж мөрлөнө."""
+        """Ээлж бүрийн блокоор: гарчиг, толгой, тухайн сарын өдрүүд (1..30/31)."""
         ndays = calendar.monthrange(dt.year, dt.month)[1]
-        rows = [[f"{dt.year}.{dt.month}.{d}"] for d in range(1, ndays + 1)]
+        values = []
+        for sh in SHIFTS:
+            values.append([sh])                                  # блокийн гарчиг
+            values.append(TOO_HEADERS)                           # толгой
+            values += [[f"{dt.year}.{dt.month}.{d}"] for d in range(1, ndays + 1)]
         self.svc.values().append(
             spreadsheetId=REPORT_SHEET_ID,
             range=f"{tab}!A:A",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
-            body={"values": rows}
+            body={"values": values}
         ).execute()
 
     def _update_row(self, tab: str, row_num: int, values: list, sheet_id: str = SHEET_ID):
@@ -548,34 +564,44 @@ class SheetsClient:
             body={"values": [values]}
         ).execute()
 
+    @staticmethod
+    def _find_haalt_row(rows: list, shift: str, date_str: str):
+        """Тухайн ээлжийн блок доторх өдрийн мөрийн дугаарыг олно (1-based)."""
+        current = None
+        for i, r in enumerate(rows, start=1):
+            c = (r[0].strip() if r else "")
+            if c in SHIFTS:
+                current = c
+            elif current == shift and c == date_str:
+                return i
+        return None
+
     def add_haalt(self, branch: str, shift: str, worker: str,
                   cash: int, zardal: int, qpay: int, kart: int,
                   notes: str, reported_by: str) -> dict:
         """
-        Ээлжийн хаалт (тооцоо) бүртгэнэ. Ээлж бүр тусдаа tab: 'Тооцоо-{салбар}-{ээлж}'.
-        Эхний бичилтэд (tab хоосон) тухайн сарын өдрүүдийг урьдчилж мөрлөнө.
-        Хаалт нь өдрийнхөө мөрөнд бичигдэнэ (байхгүй бол нэмнэ).
+        Ээлжийн хаалт (тооцоо) бүртгэнэ. Салбарт нэг tab: 'Тооцоо-{салбар}',
+        дотор нь Өглөө/Орой/Бүтэн гараа блокууд дараалж.
+        Эхний бичилтэд (tab хоосон) бүх блокийг тухайн сарын өдрүүдээр мөрлөнө.
+        Хаалт нь ээлж+өдрийнхөө мөрөнд бичигдэнэ.
         Нийт орлого = Бэлэн мөнгө + Карт данс (нягтлангийн sheet-тэй адил).
         """
         net_total = cash + kart
         now = datetime.now()
         today = f"{now.year}.{now.month}.{now.day}"
 
-        tab = f"{TOO_PREFIX}{branch}-{shift}"
-        self._ensure_tab(tab, TOO_HEADERS, REPORT_SHEET_ID)
+        tab = f"{TOO_PREFIX}{branch}"
+        self._ensure_sheet_exists(tab, REPORT_SHEET_ID)
 
         rows = self._get_rows(tab, REPORT_SHEET_ID)
-        if len(rows) <= 1:   # зөвхөн толгой → шинэ сар, өдрүүдээр дүүргэнэ
+        if not any(rows):   # хоосон tab → бүх ээлжийн блокоор сарыг мөрлөнө
             self._seed_month(tab, now)
             rows = self._get_rows(tab, REPORT_SHEET_ID)
 
         values = [today, worker, str(cash), str(zardal), notes,
                   str(qpay), str(kart), str(net_total), reported_by]
 
-        row_num = next(
-            (i for i, r in enumerate(rows[1:], start=2) if _safe(r, T_DATE) == today),
-            None
-        )
+        row_num = self._find_haalt_row(rows, shift, today)
         if row_num:
             self._update_row(tab, row_num, values, REPORT_SHEET_ID)
         else:
