@@ -6,6 +6,8 @@ Discord нь заавал биш: ACT_CHANNEL_ID тохируулсан үед �
 import asyncio
 import io
 import os
+import re
+import uuid
 from collections import defaultdict
 from datetime import datetime
 from html import escape
@@ -24,6 +26,9 @@ FONT = next((p for p in [
     r"C:\Windows\Fonts\arial.ttf",
 ] if os.path.exists(p)), None)
 PIN = os.environ.get("ACT_PIN", "")
+# Ажлын зураг: Railway Volume холбосон бол тэнд (redeploy-д устахгүй), эс бөгөөс repo хавтсанд (redeploy-д устна!)
+PHOTO_DIR = os.path.join(os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or HERE, "photos")
+PHOTO_RE = re.compile(r"^[0-9a-f]{32}\.jpg$")
 ACT_CHANNEL_ID = int(os.environ.get("ACT_CHANNEL_ID", "0") or 0)
 BRANCHES = ["түмэн", "2-спортын-төв-ордон", "3-энхтайваны-төв-ордон", "4-муис",
             "4-ps", "8-19", "9-суис", "10-цирк", "Дархан"]
@@ -124,7 +129,8 @@ def build_report_pdf(title: str, entries: list[dict]) -> bytes:
 
 @web.middleware
 async def auth(request, handler):
-    if request.path != "/" and PIN and request.headers.get("X-PIN", "") != PIN:
+    # ponytail: /photos/ PIN-гүй (<img> header явуулж чаддаггүй) — нэр нь 128-бит санамсаргүй тул таагдахгүй
+    if request.path != "/" and not request.path.startswith("/photos/") and PIN and request.headers.get("X-PIN", "") != PIN:
         return web.json_response({"error": "PIN буруу"}, status=401)
     return await handler(request)
 
@@ -220,6 +226,36 @@ async def log_tag(request):
     return web.json_response({"ok": True})
 
 
+async def task_photo(request):
+    data = await request.post()
+    raw = [p.file.read() for p in data.getall("photos", []) if getattr(p, "filename", "")]
+    if not raw:
+        return web.json_response({"error": "Зураг алга"}, status=400)
+    try:
+        imgs = await asyncio.to_thread(lambda: [shrink(r) for r in raw])
+    except Exception:
+        return web.json_response({"error": "Зураг уншиж чадсангүй"}, status=400)
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    names = []
+    for img in imgs:
+        names.append(f"{uuid.uuid4().hex}.jpg")
+        with open(os.path.join(PHOTO_DIR, names[-1]), "wb") as fh:
+            fh.write(img)
+    try:
+        await asyncio.to_thread(request.app["sheets"].add_task_photos, data.get("id", ""), names)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=404)
+    return web.json_response({"photos": names})
+
+
+async def photo_get(request):
+    name = request.match_info["name"]
+    path = os.path.join(PHOTO_DIR, name)
+    if not PHOTO_RE.match(name) or not os.path.exists(path):
+        raise web.HTTPNotFound()
+    return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 async def tasks_move(request):
     d = await request.json()
     try:
@@ -292,6 +328,8 @@ def make_app(sheets, bot=None) -> web.Application:
     app.router.add_post("/api/tasks/move", tasks_move)
     app.router.add_post("/api/chat", chat_post)
     app.router.add_post("/api/log/tag", log_tag)
+    app.router.add_post("/api/tasks/photo", task_photo)
+    app.router.add_get("/photos/{name}", photo_get)
     app.router.add_get("/api/acts", acts_get)
     app.router.add_post("/api/act", act_post)
     return app

@@ -5,3 +5,4 @@ __pycache__/
 *.pyo
 files.zip
 test_*.pdf
+photos/

@@ -83,6 +83,22 @@ async def main():
         open("test_act.pdf", "wb").write(pdf)
         assert "Дархан" in s.log[-1]["text"]                          # акт тайланд орсон
 
+        # ажил дээр зураг: хадгална, PIN-гүй нээгдэнэ, буруу нэр 404
+        import tempfile
+        web.PHOTO_DIR = tempfile.mkdtemp()
+        fd = FormData(); fd.add_field("id", tid)
+        for _ in range(2):
+            fd.add_field("photos", img.getvalue(), filename="a.jpg", content_type="image/jpeg")
+        r = await c.post("/api/tasks/photo", data=fd, headers=H)
+        names = (await r.json())["photos"]
+        assert r.status == 200 and len(names) == 2
+        assert {t["id"]: t for t in s.get_tasks()}[tid]["photos"] == ",".join(names)
+        assert (await c.get("/photos/" + names[0])).status == 200
+        assert (await c.get("/photos/..%2Fsheets.py")).status == 404
+        assert (await c.get("/photos/" + "0" * 32 + ".jpg")).status == 404
+        fd = FormData(); fd.add_field("id", "T-9999"); fd.add_field("photos", img.getvalue(), filename="a.jpg")
+        assert (await c.post("/api/tasks/photo", data=fd, headers=H)).status == 404
+
         found = await (await c.get("/api/acts?q=дархан", headers=H)).json()
         assert found and found[0]["Акт ID"] == "ACT-0001"
 

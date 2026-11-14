@@ -66,7 +66,7 @@ def auto_tag(text: str) -> str:
     low = text.lower()
     return next((t for t in TAGS if t.lower() in low), "")
 TAB_TASK = "Ажлууд"    # хийх ажлын жагсаалт
-TASK_HEADERS = ["ID", "Ажил", "Төлөв", "Нэмсэн", "Дууссан", "Тэмдэглэл", "Эх"]   # Эх = main ажлын ID (sub бол)
+TASK_HEADERS = ["ID", "Ажил", "Төлөв", "Нэмсэн", "Дууссан", "Тэмдэглэл", "Эх", "Зураг"]   # Эх = main ажлын ID (sub бол), Зураг = файлын нэрс таслалаар
 # Тооцоо нь салбар бүрт тусдаа tab үүснэ: "Тооцоо-{branch}"
 TOO_PREFIX = "Тооцоо-"
 # Агуулах бас салбар бүрт тусдаа tab: "Агуулах-{branch}"
@@ -614,9 +614,16 @@ class SheetsClient:
         return tid
 
     def get_tasks(self) -> list[dict]:
-        keys = ["id", "text", "status", "created", "done", "note", "parent"]
-        return [dict(zip(keys, [_safe(r, i) for i in range(7)]))
+        keys = ["id", "text", "status", "created", "done", "note", "parent", "photos"]
+        return [dict(zip(keys, [_safe(r, i) for i in range(8)]))
                 for r in self._get_rows(TAB_TASK)[1:] if _safe(r, 0)]
+
+    def add_task_photos(self, tid: str, names: list[str]):
+        row = self._find_row(TAB_TASK, 0, tid)
+        if row is None:
+            raise ValueError("Ажил олдсонгүй")
+        old = _safe(self._get_rows(TAB_TASK)[row - 1], 7)
+        self._update_cell(TAB_TASK, row, "H", ",".join(filter(None, [old, *names])))
 
     def move_task(self, tid: str, parent: str):
         """Ажлыг өөр main-ийн sub болгоно (parent='' → дахин main). Ганц түвшин."""
