@@ -14,6 +14,8 @@ from aiohttp import web
 from fpdf import FPDF
 from PIL import Image, ImageOps
 
+from sheets import TAGS
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 # ponytail: эхний олдсон кирилл фонт — Railway-д fonts/DejaVuSans.ttf repo-д байх ёстой
 FONT = next((p for p in [
@@ -28,7 +30,9 @@ BRANCHES = ["түмэн", "2-спортын-төв-ордон", "3-энхтай�
 
 with open(os.path.join(HERE, "app.html"), encoding="utf-8") as fh:
     APP_HTML = fh.read().replace(
-        "{{BRANCHES}}", "".join(f'<option value="{escape(b)}">' for b in BRANCHES))
+        "{{BRANCHES}}", "".join(f'<option value="{escape(b)}">' for b in BRANCHES)).replace(
+        "{{TAGS}}", "".join(f'<option value="{escape(t)}">{escape(t)}</option>' for t in TAGS))
+WD = ["Даваа", "Мягмар", "Лхагва", "Пүрэв", "Баасан", "Бямба", "Ням"]
 
 
 # ── Цэвэр функцууд (тестлэгдэнэ) ─────────────────────────────────────────────
@@ -54,6 +58,15 @@ def shrink(data: bytes) -> bytes:
     out = io.BytesIO()
     img.save(out, "JPEG", quality=70)
     return out.getvalue()
+
+
+def day_label(d: str) -> str:
+    """'2026-11-14' → '2026-11-14 · Бямба · 46-р 7 хоног' (ISO долоо хоног)."""
+    try:
+        dt = datetime.strptime(d, "%Y-%m-%d")
+    except ValueError:
+        return d
+    return f"{d} · {WD[dt.weekday()]} · {dt.isocalendar()[1]}-р 7 хоног"
 
 
 def _new_pdf() -> FPDF:
@@ -87,18 +100,18 @@ def build_act_pdf(act_id: str, date: str, f: dict, items: list[dict], photos: li
     return bytes(pdf.output())
 
 
-def build_report_pdf(month: str, entries: list[dict]) -> bytes:
+def build_report_pdf(title: str, entries: list[dict]) -> bytes:
     """Сарын тайлан — Word-ийн хэлбэртэй: огноо, доор нь мөрүүд."""
     pdf = _new_pdf()
     pdf.set_font_size(16)
-    pdf.cell(0, 12, f"{month} — Ажлын тайлан", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 12, f"{title} — Ажлын тайлан", align="C", new_x="LMARGIN", new_y="NEXT")
     by_day = defaultdict(list)
     for e in entries:
-        by_day[e["date"]].append(e["text"])
+        by_day[e["date"]].append((f"[{e['tag']}] " if e.get("tag") else "") + e["text"])
     for day in sorted(by_day):
         pdf.ln(3)
         pdf.set_font_size(12)
-        pdf.cell(0, 8, day, new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, day_label(day), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font_size(11)
         for text in by_day[day]:
             pdf.multi_cell(0, 6, f"• {text}", new_x="LMARGIN", new_y="NEXT")
@@ -123,14 +136,35 @@ async def index(request):
     return web.Response(text=APP_HTML, content_type="text/html")
 
 
+def _range(q) -> tuple[str, str]:
+    """?from=&to= (YYYY-MM-DD) эсвэл ?month=YYYY-MM (хоосон бол энэ сар)."""
+    if q.get("from"):
+        a, b = q["from"], q.get("to") or q["from"]
+        fmt = "%Y-%m-%d"
+    else:
+        m = q.get("month") or datetime.now().strftime("%Y-%m")
+        a, b, fmt = m, m, "%Y-%m"
+    try:
+        datetime.strptime(a, fmt), datetime.strptime(b, fmt)
+    except ValueError:
+        raise web.HTTPBadRequest(text="Огноо буруу")
+    # ponytail: мөр харьцуулалт тул сарын төгсгөл "-31" бүх сард болно
+    return (a, b) if fmt == "%Y-%m-%d" else (a + "-01", b + "-31")
+
+
+async def _entries(request):
+    a, b = _range(request.query)
+    return a, b, await asyncio.to_thread(request.app["sheets"].get_log, a, b, request.query.get("tag", ""))
+
+
 async def log_get(request):
-    month = request.query.get("month") or datetime.now().strftime("%Y-%m")
-    return web.json_response(await asyncio.to_thread(request.app["sheets"].get_log, month))
+    _, _, entries = await _entries(request)
+    return web.json_response([{**e, "label": day_label(e["date"])} for e in entries])
 
 
 async def log_post(request):
     d = await request.json()
-    text, date = (d.get("text") or "").strip(), (d.get("date") or "").strip()
+    text, date, tag = ((d.get(k) or "").strip() for k in ("text", "date", "tag"))
     if not text:
         return web.json_response({"error": "Хоосон байна"}, status=400)
     try:
@@ -139,14 +173,14 @@ async def log_post(request):
         return web.json_response({"error": "Огноо буруу"}, status=400)
     # ponytail: олон мөр бичвэл мөр бүр тусдаа бичлэг
     for line in filter(None, (l.strip() for l in text.splitlines())):
-        await asyncio.to_thread(request.app["sheets"].add_log, line, date)
+        await asyncio.to_thread(request.app["sheets"].add_log, line, date, tag)
     return web.json_response({"ok": True})
 
 
 async def report_pdf(request):
-    month = request.query.get("month") or datetime.now().strftime("%Y-%m")
-    entries = await asyncio.to_thread(request.app["sheets"].get_log, month)
-    return _pdf(await asyncio.to_thread(build_report_pdf, month, entries), f"Тайлан-{month}.pdf")
+    a, b, entries = await _entries(request)
+    title = a if a == b else f"{a} — {b}"
+    return _pdf(await asyncio.to_thread(build_report_pdf, title, entries), f"Тайлан-{a}_{b}.pdf")
 
 
 async def tasks_get(request):
@@ -154,10 +188,14 @@ async def tasks_get(request):
 
 
 async def tasks_post(request):
-    text = ((await request.json()).get("text") or "").strip()
+    d = await request.json()
+    text, parent = (d.get("text") or "").strip(), (d.get("parent") or "").strip()
     if not text:
         return web.json_response({"error": "Хоосон байна"}, status=400)
-    tid = await asyncio.to_thread(request.app["sheets"].add_task, text)
+    try:
+        tid = await asyncio.to_thread(request.app["sheets"].add_task, text, parent)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"id": tid})
 
 

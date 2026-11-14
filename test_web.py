@@ -4,27 +4,22 @@ from aiohttp import FormData
 from aiohttp.test_utils import TestClient, TestServer
 from PIL import Image
 import web
+import sheets as sh
 
 
-class FakeSheets:
+class MemSheets(sh.SheetsClient):
+    """Жинхэнэ SheetsClient логик, зөвхөн хадгалалт нь санах ойд."""
     def __init__(self):
-        self.log, self.tasks, self.acts = [], [], []
-    def add_log(self, text, date=""): self.log.append({"date": date or "2026-11-14", "time": "10:00", "text": text})
-    def get_log(self, month): return [e for e in self.log if e["date"].startswith(month)]
-    def add_task(self, text):
-        tid = f"T-{len(self.tasks)+1:04d}"
-        self.tasks.append({"id": tid, "text": text, "status": "Хийх", "created": "", "done": "", "note": ""})
-        return tid
-    def get_tasks(self): return self.tasks
-    def finish_task(self, tid, note):
-        t = next((t for t in self.tasks if t["id"] == tid), None)
-        if not t: return None
-        t.update(status="Хийсэн", note=note); self.add_log(f"Дууссан: {t['text']} — {note}")
-        return t["text"]
-    def next_act_id(self): return f"ACT-{len(self.acts)+1:04d}"
+        self.data = {sh.TAB_LOG: [sh.LOG_HEADERS], sh.TAB_TASK: [sh.TASK_HEADERS], sh.TAB_ACT: [sh.ACT_HEADERS]}
+    def _get_rows(self, tab, sheet_id=None): return [list(r) for r in self.data[tab]]
+    def _append_row(self, tab, row, sheet_id=None): self.data[tab].append(list(row))
+    def _update_row(self, tab, n, values, sheet_id=None): self.data[tab][n - 1] = list(values)
     def add_act(self, act_id, date, f, items, link):
-        self.acts += [{"Акт ID": act_id, "Хаашаа": f["dst"], "Зүйл": i["item"], "Серийн дугаар": i["serial"]} for i in items]
-    def get_acts(self, q=""): return [a for a in self.acts if q.lower() in " ".join(a.values()).lower()]
+        for it in items:
+            self._append_row(sh.TAB_ACT, [act_id, date, f["src"], f["dst"], f["giver"], f["receiver"],
+                                          it["item"], str(it["qty"]), it["serial"], f["notes"], link])
+    @property
+    def log(self): return self.get_log("0000", "9999")
 
 
 async def main():
@@ -32,7 +27,8 @@ async def main():
         {"item": "PC", "qty": 12, "serial": "SN1"}, {"item": "Монитор", "qty": 1, "serial": "M7"}]
 
     web.PIN = "1234"
-    s = FakeSheets()
+    s = MemSheets()
+    assert web.day_label("2026-11-14") == "2026-11-14 · Бямба · 46-р 7 хоног"
     async with TestClient(TestServer(web.make_app(s))) as c:
         assert (await c.get("/")).status == 200                      # хуудас PIN-гүй нээгдэнэ
         assert (await c.get("/api/tasks")).status == 401             # API PIN-тэй
@@ -42,9 +38,26 @@ async def main():
         assert (await c.post("/api/log", json={"text": "a\n\nb", "date": "2026-11-13"}, headers=H)).status == 200
         assert [e["text"] for e in s.log if e["date"] == "2026-11-13"] == ["a", "b"]
         assert (await c.post("/api/log", json={"text": "x", "date": "13/11"}, headers=H)).status == 400
+        # tag: автомат (Lof), гараар (Crystal), шүүлт, 7 хоногийн хүрээ
+        assert (await c.post("/api/log", json={"text": "Domofon", "date": "2026-11-10", "tag": "Crystal"}, headers=H)).status == 200
+        wk = await (await c.get("/api/log?from=2026-11-09&to=2026-11-15", headers=H)).json()
+        assert {e["text"]: e["tag"] for e in wk}["Lof 4 тог баригч солисон"] == "Lof"
+        assert [e["text"] for e in wk if e["tag"] == "Crystal"] == ["Domofon"]
+        only = await (await c.get("/api/log?from=2026-11-09&to=2026-11-15&tag=lof", headers=H)).json()
+        assert [e["text"] for e in only] == ["Lof 4 тог баригч солисон"]
+        assert (await c.get("/api/log?from=2026-11-14&to=2026-11-14", headers=H)).status == 200
+        assert (await c.get("/api/log?from=bad", headers=H)).status == 400
+
+        # main / sub ажил
         tid = (await (await c.post("/api/tasks", json={"text": "Дархан руу PC бэлдэх"}, headers=H)).json())["id"]
+        sub = (await (await c.post("/api/tasks", json={"text": "SSD шалгах", "parent": tid}, headers=H)).json())["id"]
+        assert (await c.post("/api/tasks", json={"text": "x", "parent": sub}, headers=H)).status == 400   # sub-ийн sub болохгүй
+        assert (await c.post("/api/tasks", json={"text": "x", "parent": "T-9999"}, headers=H)).status == 400
+        assert (await c.post("/api/tasks/done", json={"id": sub, "note": "7 ширхэг"}, headers=H)).status == 200
+        assert s.log[-1]["text"] == "Дууссан: Дархан руу PC бэлдэх › SSD шалгах — 7 ширхэг"
         assert (await c.post("/api/tasks/done", json={"id": tid, "note": "12 ширхэг бэлэн"}, headers=H)).status == 200
-        assert s.tasks[0]["status"] == "Хийсэн" and "12 ширхэг бэлэн" in s.log[-1]["text"]
+        t = {t["id"]: t for t in s.get_tasks()}
+        assert t[tid]["status"] == "Хийсэн" and t[sub]["parent"] == tid and "12 ширхэг бэлэн" in s.log[-1]["text"]
 
         img = io.BytesIO(); Image.new("RGB", (3000, 2000), "red").save(img, "JPEG")
         fd = FormData()

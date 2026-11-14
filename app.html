@@ -29,9 +29,15 @@
   .step { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff;
           font-size: 12px; display: inline-grid; place-items: center; }
   label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
-  input, textarea { width: 100%; padding: 12px; font-size: 16px; color: var(--text);
+  .seg { display: flex; gap: 6px; margin-bottom: 8px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent);
+         padding: 1px 7px; border-radius: 999px; margin-right: 6px; }
+  .task.sub { margin-left: 30px; }
+  select { appearance: none; }
+  input, textarea, select { width: 100%; padding: 12px; font-size: 16px; color: var(--text);
                     background: var(--bg); border: 1px solid var(--line); border-radius: 10px; outline: none; }
-  input:focus, textarea:focus { border-color: var(--accent); }
+  .line > select { flex: 1; min-width: 0; }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   textarea { resize: vertical; }
   .muted { color: var(--muted); font-size: 14px; }
 
@@ -106,15 +112,25 @@
     <div class="card">
       <h2>Өнөөдөр юу хийсэн бэ?</h2>
       <textarea id="logText" rows="3" placeholder="жш: Lof 4 орж тог баригч солисон&#10;(мөр бүр тусдаа бичлэг)"></textarea>
-      <label class="muted" style="display:block;margin-top:6px">Өөр өдөр (хоосон = өнөөдөр)
-        <input type="date" id="logDate" style="width:100%"></label>
+      <div class="line">
+        <input type="date" id="logDate" title="Өөр өдөр (хоосон = өнөөдөр)">
+        <input id="logTag" list="tags" placeholder="Tag (автомат)" autocomplete="off">
+      </div>
+      <datalist id="tags">{{TAGS}}</datalist>
       <button class="btn" style="width:100%;margin-top:8px" onclick="addLog(this)">Нэмэх</button>
     </div>
     <div class="card">
+      <div class="seg" id="mode">
+        <button type="button" class="chip" data-v="day">Өдөр</button>
+        <button type="button" class="chip on" data-v="week">7 хоног</button>
+        <button type="button" class="chip" data-v="month">Сар</button>
+      </div>
       <div class="line" style="margin:0">
-        <input type="month" id="month" onchange="loadLog()">
+        <input type="date" id="pickDate" onchange="loadLog()">
+        <select id="tagFilter" onchange="loadLog()"><option value="">Бүх tag</option>{{TAGS}}</select>
         <button class="btn soft" onclick="reportPdf(this)">PDF</button>
       </div>
+      <p class="muted" id="rangeLbl" style="margin:8px 0 0"></p>
       <div id="logList"><p class="muted">Ачаалж байна...</p></div>
     </div>
   </section>
@@ -123,7 +139,12 @@
   <section id="tab-tasks" hidden>
     <div class="card">
       <h2>Хийх ажил нэмэх</h2>
-      <div class="line" style="margin:0">
+      <div class="seg" id="kind">
+        <button type="button" class="chip on" data-v="main">Main ажил</button>
+        <button type="button" class="chip" data-v="sub">Sub ажил</button>
+      </div>
+      <select id="parent" hidden></select>
+      <div class="line">
         <input id="taskText" placeholder="жш: Дархан руу 12 PC бэлдэх" onkeydown="if(event.key==='Enter')addTask()">
         <button class="btn" onclick="addTask()">+</button>
       </div>
@@ -222,54 +243,93 @@ function show(tab) {
 }
 
 // ── Тайлан ──
-$('#month').value = new Date().toISOString().slice(0, 7);
+// toISOString нь UTC тул +8 цагт өдөр алдагдана — локал огноо
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function seg(id, onChange) {
+  document.querySelectorAll(`#${id} .chip`).forEach(c => c.onclick = () => {
+    document.querySelectorAll(`#${id} .chip`).forEach(x => x.classList.toggle('on', x === c));
+    onChange(c.dataset.v);
+  });
+  return () => $(`#${id} .chip.on`).dataset.v;
+}
+const mode = seg('mode', () => loadLog());
+$('#pickDate').value = ymd(new Date());
+function range() {
+  const d = new Date(($('#pickDate').value || ymd(new Date())) + 'T00:00');
+  if (mode() === 'day') return [ymd(d), ymd(d)];
+  if (mode() === 'week') {   // Даваа → Ням
+    const s = new Date(d); s.setDate(d.getDate() - (d.getDay() + 6) % 7);
+    const e = new Date(s); e.setDate(s.getDate() + 6);
+    return [ymd(s), ymd(e)];
+  }
+  return [ymd(new Date(d.getFullYear(), d.getMonth(), 1)), ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0))];
+}
+const q = () => { const [a, b] = range(); return `from=${a}&to=${b}&tag=${encodeURIComponent($('#tagFilter').value)}`; };
 async function loadLog() {
+  const [a, b] = range();
+  $('#rangeLbl').textContent = a === b ? a : `${a} — ${b}`;
   try {
-    const rows = await (await api('/api/log?month=' + $('#month').value)).json();
+    const rows = await (await api('/api/log?' + q())).json();
     const days = {};
     rows.forEach(r => (days[r.date] ||= []).push(r));
     const keys = Object.keys(days).sort().reverse();
     $('#logList').innerHTML = keys.length ? keys.map(d =>
-      `<div class="day"><h3>${esc(d)}</h3>` +
-      days[d].map(e => `<div class="entry"><time>${esc(e.time)}</time>${esc(e.text)}</div>`).join('') + '</div>'
-    ).join('') : '<p class="muted">Энэ сард бичлэг алга.</p>';
+      `<div class="day"><h3>${esc(days[d][0].label)}</h3>` +
+      days[d].map(e => `<div class="entry"><time>${esc(e.time)}</time>${e.tag ? `<span class="tag">${esc(e.tag)}</span>` : ''}${esc(e.text)}</div>`).join('') + '</div>'
+    ).join('') : '<p class="muted">Бичлэг алга.</p>';
   } catch (e) { $('#logList').innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
 }
 async function addLog(btn) {
   const t = $('#logText').value.trim();
   if (!t) return;
   btn.disabled = true;
-  try { await postJSON('/api/log', { text: t, date: $('#logDate').value }); $('#logText').value = ''; await loadLog(); }
-  catch (e) { alert(e.message); }
+  try {
+    await postJSON('/api/log', { text: t, date: $('#logDate').value, tag: $('#logTag').value });
+    $('#logText').value = ''; await loadLog();
+  } catch (e) { alert(e.message); }
   btn.disabled = false;
 }
 async function reportPdf(btn) {
   btn.disabled = true;
   try {
-    const m = $('#month').value;
-    download(await (await api('/api/report.pdf?month=' + m)).blob(), `Тайлан-${m}.pdf`);
+    const [a, b] = range();
+    download(await (await api('/api/report.pdf?' + q())).blob(), `Тайлан-${a === b ? a : a + '_' + b}.pdf`);
   } catch (e) { alert(e.message); }
   btn.disabled = false;
 }
 
 // ── Ажлууд ──
+const kind = seg('kind', v => $('#parent').hidden = v !== 'sub');
 async function loadTasks() {
   try {
     const all = await (await api('/api/tasks')).json();
-    const open = all.filter(t => t.status !== 'Хийсэн'), done = all.filter(t => t.status === 'Хийсэн').reverse();
-    const row = (t, isDone) => `<div class="task${isDone ? ' done' : ''}">
-        <button class="check" ${isDone ? 'disabled' : `onclick="finish('${esc(t.id)}')"`} aria-label="Дууссан">${isDone ? '✓' : ''}</button>
-        <div><div class="t">${esc(t.text)}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
-        ${isDone ? `<div class="note">${esc(t.done)}</div>` : ''}</div></div>`;
-    $('#taskList').innerHTML = open.length ? open.map(t => row(t, false)).join('') : '<p class="muted">Хийх ажил алга 🎉</p>';
-    $('#doneList').innerHTML = done.map(t => row(t, true)).join('');
+    const byId = Object.fromEntries(all.map(t => [t.id, t]));
+    const isDone = t => t.status === 'Хийсэн';
+    const open = all.filter(t => !isDone(t)), done = all.filter(isDone).reverse();
+    // sub-ийн main нь харагдахгүй (дууссан) бол "Main › " гэж угтвар тавина
+    const name = (t, nested) => (!nested && byId[t.parent] ? `<span class="note">${esc(byId[t.parent].text)} › </span>` : '') + esc(t.text);
+    const row = (t, d, nested) => `<div class="task${d ? ' done' : ''}${nested ? ' sub' : ''}">
+        <button class="check" ${d ? 'disabled' : `onclick="finish('${esc(t.id)}')"`} aria-label="Дууссан">${d ? '✓' : ''}</button>
+        <div><div class="t">${name(t, nested)}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
+        ${d ? `<div class="note">${esc(t.done)}</div>` : ''}</div></div>`;
+    const tops = open.filter(t => !open.some(m => m.id === t.parent));
+    $('#taskList').innerHTML = tops.length ? tops.map(m =>
+      row(m, false, false) + open.filter(s => s.parent === m.id).map(s => row(s, false, true)).join('')
+    ).join('') : '<p class="muted">Хийх ажил алга 🎉</p>';
+    $('#doneList').innerHTML = done.map(t => row(t, true, false)).join('');
     $('#doneWrap').hidden = !done.length;
+    const keep = $('#parent').value;
+    $('#parent').innerHTML = '<option value="">— Main ажил сонгох —</option>' +
+      open.filter(t => !t.parent).map(t => `<option value="${esc(t.id)}">${esc(t.text)}</option>`).join('');
+    $('#parent').value = keep;
   } catch (e) { $('#taskList').innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
 }
 async function addTask() {
   const t = $('#taskText').value.trim();
   if (!t) return;
-  try { await postJSON('/api/tasks', { text: t }); $('#taskText').value = ''; loadTasks(); }
+  const parent = kind() === 'sub' ? $('#parent').value : '';
+  if (kind() === 'sub' && !parent) return alert('Sub ажлын Main ажлыг сонгоно уу');
+  try { await postJSON('/api/tasks', { text: t, parent }); $('#taskText').value = ''; loadTasks(); }
   catch (e) { alert(e.message); }
 }
 async function finish(id) {
