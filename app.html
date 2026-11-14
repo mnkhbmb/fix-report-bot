@@ -105,7 +105,9 @@
   <section id="tab-log">
     <div class="card">
       <h2>Өнөөдөр юу хийсэн бэ?</h2>
-      <textarea id="logText" rows="3" placeholder="жш: Lof 4 орж тог баригч солисон"></textarea>
+      <textarea id="logText" rows="3" placeholder="жш: Lof 4 орж тог баригч солисон&#10;(мөр бүр тусдаа бичлэг)"></textarea>
+      <label class="muted" style="display:block;margin-top:6px">Өөр өдөр (хоосон = өнөөдөр)
+        <input type="date" id="logDate" style="width:100%"></label>
       <button class="btn" style="width:100%;margin-top:8px" onclick="addLog(this)">Нэмэх</button>
     </div>
     <div class="card">
@@ -237,7 +239,7 @@ async function addLog(btn) {
   const t = $('#logText').value.trim();
   if (!t) return;
   btn.disabled = true;
-  try { await postJSON('/api/log', { text: t }); $('#logText').value = ''; await loadLog(); }
+  try { await postJSON('/api/log', { text: t, date: $('#logDate').value }); $('#logText').value = ''; await loadLog(); }
   catch (e) { alert(e.message); }
   btn.disabled = false;
 }

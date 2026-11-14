@@ -129,10 +129,17 @@ async def log_get(request):
 
 
 async def log_post(request):
-    text = ((await request.json()).get("text") or "").strip()
+    d = await request.json()
+    text, date = (d.get("text") or "").strip(), (d.get("date") or "").strip()
     if not text:
         return web.json_response({"error": "Хоосон байна"}, status=400)
-    await asyncio.to_thread(request.app["sheets"].add_log, text)
+    try:
+        date = datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%d") if date else ""
+    except ValueError:
+        return web.json_response({"error": "Огноо буруу"}, status=400)
+    # ponytail: олон мөр бичвэл мөр бүр тусдаа бичлэг
+    for line in filter(None, (l.strip() for l in text.splitlines())):
+        await asyncio.to_thread(request.app["sheets"].add_log, line, date)
     return web.json_response({"ok": True})
 
 

@@ -9,7 +9,7 @@ import web
 class FakeSheets:
     def __init__(self):
         self.log, self.tasks, self.acts = [], [], []
-    def add_log(self, text): self.log.append({"date": "2026-11-14", "time": "10:00", "text": text})
+    def add_log(self, text, date=""): self.log.append({"date": date or "2026-11-14", "time": "10:00", "text": text})
     def get_log(self, month): return [e for e in self.log if e["date"].startswith(month)]
     def add_task(self, text):
         tid = f"T-{len(self.tasks)+1:04d}"
@@ -39,6 +39,9 @@ async def main():
         H = {"X-PIN": "1234"}
 
         assert (await c.post("/api/log", json={"text": "Lof 4 тог баригч солисон"}, headers=H)).status == 200
+        assert (await c.post("/api/log", json={"text": "a\n\nb", "date": "2026-11-13"}, headers=H)).status == 200
+        assert [e["text"] for e in s.log if e["date"] == "2026-11-13"] == ["a", "b"]
+        assert (await c.post("/api/log", json={"text": "x", "date": "13/11"}, headers=H)).status == 400
         tid = (await (await c.post("/api/tasks", json={"text": "Дархан руу PC бэлдэх"}, headers=H)).json())["id"]
         assert (await c.post("/api/tasks/done", json={"id": tid, "note": "12 ширхэг бэлэн"}, headers=H)).status == 200
         assert s.tasks[0]["status"] == "Хийсэн" and "12 ширхэг бэлэн" in s.log[-1]["text"]

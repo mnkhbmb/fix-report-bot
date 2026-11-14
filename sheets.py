@@ -566,9 +566,11 @@ class SheetsClient:
 
     # ── Тайлан / Ажлууд ───────────────────────────────────────────────────────
 
-    def add_log(self, text: str):
+    def add_log(self, text: str, date: str = ""):
+        """date='2026-11-13' → өнгөрсөн өдөрт нөхөж бичнэ (цаг хоосон)."""
         now = datetime.now()
-        self._append_row(TAB_LOG, [now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), text])
+        row = [date, "", text] if date else [now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), text]
+        self._append_row(TAB_LOG, row)
 
     def get_log(self, month: str) -> list[dict]:
         """month='2026-11' → тэр сарын бичлэгүүд."""
