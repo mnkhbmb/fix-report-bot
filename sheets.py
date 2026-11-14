@@ -626,15 +626,17 @@ class SheetsClient:
         self._update_cell(TAB_TASK, row, "H", ",".join(filter(None, [old, *names])))
 
     def move_task(self, tid: str, parent: str):
-        """Ажлыг өөр main-ийн sub болгоно (parent='' → дахин main). Ганц түвшин."""
+        """Ажлыг өөр main-ийн sub болгоно (parent='' → дахин main). Ганц түвшин:
+        sub-тай main-ийг зөөвөл 2 main нэгтгэгдэнэ — түүний sub-ууд шинэ main-ий доор шилжинэ."""
         tasks = {t["id"]: t for t in self.get_tasks()}
         if tid not in tasks:
             raise ValueError("Ажил олдсонгүй")
         if parent:
             if parent == tid or parent not in tasks or tasks[parent]["parent"]:
                 raise ValueError("Main ажил олдсонгүй")
-            if any(t["parent"] == tid for t in tasks.values()):
-                raise ValueError("Энэ ажил өөрөө sub-тай — эхлээд sub-уудыг нь зөөнө үү")
+            for t in tasks.values():
+                if t["parent"] == tid:
+                    self._update_cell(TAB_TASK, self._find_row(TAB_TASK, 0, t["id"]), "G", parent)
         self._update_cell(TAB_TASK, self._find_row(TAB_TASK, 0, tid), "G", parent)
 
     def finish_task(self, tid: str, note: str) -> Optional[str]:

@@ -432,7 +432,7 @@ async function loadTasks() {
     // sub-ийн main нь харагдахгүй (дууссан) бол "Main › " гэж угтвар тавина
     const name = (t, nested) => (!nested && byId[t.parent] ? `<span class="note">${esc(byId[t.parent].text)} › </span>` : '') + esc(t.text);
     const mains = open.filter(t => !t.parent);
-    // ⇄ — өөр main-ийн доор зөөх / дахин main болгох (sub-тай main-ийг сервер татгалзана)
+    // ⋯ → ↳ өөр main-ийн доор зөөх; sub-тай main бол 2 main нэгтгэгдэж sub-ууд нь хамт шилжинэ
     // ⋯ цэс: зураг нэмэх + (дуусаагүй бол) зөөх
     const mover = (t, d) => `<select class="mv" aria-label="Цэс" onchange="move('${esc(t.id)}', this.value)">
         <option value="_" selected hidden>⋯</option>

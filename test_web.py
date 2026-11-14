@@ -61,10 +61,16 @@ async def main():
         other = (await (await c.post("/api/tasks", json={"text": "Kiosk авах"}, headers=H)).json())["id"]
         assert (await mv(other, tid)).status == 200
         assert {t["id"]: t for t in s.get_tasks()}[other]["parent"] == tid
-        assert (await mv(tid, other)).status == 400      # sub-тай main зөөгдөхгүй / sub-ийн доор орохгүй
+        assert (await mv(tid, other)).status == 400      # sub-ийн доор орохгүй (ганц түвшин)
         assert (await mv(other, other)).status == 400
         assert (await mv(other, "")).status == 200
         assert {t["id"]: t for t in s.get_tasks()}[other]["parent"] == ""
+        # 2 main нэгтгэх: sub-тай tid-г other руу → tid болон түүний sub хоёулаа other-ийн доор
+        assert (await mv(tid, other)).status == 200
+        p = {t["id"]: t["parent"] for t in s.get_tasks()}
+        assert p[tid] == other and p[sub] == other
+        assert (await mv(tid, "")).status == 200 and (await mv(sub, tid)).status == 200   # буцааж тавина
+        assert (await mv(other, "")).status == 200
         assert (await c.post("/api/tasks/done", json={"id": sub, "note": "7 ширхэг"}, headers=H)).status == 200
         assert s.log[-1]["text"] == "Дууссан: Дархан руу PC бэлдэх › SSD шалгах — 7 ширхэг"
         assert (await c.post("/api/tasks/done", json={"id": tid, "note": "12 ширхэг бэлэн"}, headers=H)).status == 200
