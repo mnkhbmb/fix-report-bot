@@ -75,6 +75,15 @@
   .task.done .check { border-color: var(--ok); background: var(--ok); color: #fff; }
   .task.done .t { color: var(--muted); text-decoration: line-through; }
   .task .note { font-size: 13px; color: var(--muted); }
+  .task.bye { max-height: 300px; overflow: hidden; animation: bye .4s ease-in .45s forwards; }
+  .task.bye .check { animation: pop .35s ease-out; }
+  @keyframes pop { 50% { transform: scale(1.4); } }
+  @keyframes bye { to { opacity: 0; transform: translateX(40px); max-height: 0; padding: 0; border: 0; } }
+  /* Ачаалж байх үеийн дээд зурвас */
+  body.busy::before { content: ""; position: fixed; top: 0; left: 0; width: 40%; height: 3px; background: var(--accent);
+                      z-index: 99; animation: load 1s ease-in-out infinite; }
+  @keyframes load { from { left: -40%; } to { left: 100%; } }
+  @media (prefers-reduced-motion: reduce) { .task.bye, .task.bye .check, body.busy::before { animation-duration: .01s; } }
   details summary { cursor: pointer; color: var(--muted); font-size: 14px; padding: 6px 0; }
 
   /* Акт */
@@ -245,14 +254,20 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // ── API (PIN-ийг нэг удаа асууж хадгална) ──
+let BUSY = 0;
+const busy = d => document.body.classList.toggle('busy', (BUSY += d) > 0);
 async function api(path, opts = {}) {
+  busy(1);
+  try { return await call(path, opts); } finally { busy(-1); }
+}
+async function call(path, opts) {
   let pin = ''; try { pin = localStorage.pin || ''; } catch {}
   const r = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), 'X-PIN': pin } });
   if (r.status === 401) {
     const p = prompt('PIN код');
     if (p === null) throw new Error('PIN шаардлагатай');
     try { localStorage.pin = p; } catch {}
-    return api(path, opts);
+    return call(path, opts);
   }
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || ('Алдаа ' + r.status));
   return r;
@@ -452,7 +467,7 @@ async function loadTasks() {
   try {
     const all = await (await api('/api/tasks')).json();
     const byId = Object.fromEntries(all.map(t => [t.id, t]));
-    const isDone = t => t.status === 'Хийсэн';
+    const isDone = t => t.status === 'Хийсэн' || PEND.has(t.id);   // хадгалагдаж байгааг дахин харуулахгүй
     const open = all.filter(t => !isDone(t)), done = all.filter(isDone).reverse();
     // sub-ийн main нь харагдахгүй (дууссан) бол "Main › " гэж угтвар тавина
     const name = (t, nested) => (!nested && byId[t.parent] ? `<span class="note">${esc(byId[t.parent].text)} › </span>` : '') + esc(t.text);
@@ -469,7 +484,7 @@ async function loadTasks() {
         `<a href="/photos/${esc(p)}" target="_blank" rel="noopener"><img src="/photos/${esc(p)}" loading="lazy" alt=""></a>`).join('')}</div>` : '';
     // cnt = {open, total} — sub-тай main бол дарахад sub-ууд нээгдэнэ
     const row = (t, d, nested, cnt) => `<div class="task${d ? ' done' : ''}${nested ? ' sub' : ''}">
-        <button class="check" ${d ? 'disabled' : `onclick="finish('${esc(t.id)}')"`} aria-label="Дууссан">${d ? '✓' : ''}</button>
+        <button class="check" ${d ? 'disabled' : `onclick="finish('${esc(t.id)}', this)"`} aria-label="Дууссан">${d ? '✓' : ''}</button>
         <div style="flex:1"${cnt ? ` class="fold" onclick="toggle('${esc(t.id)}', this)"` : ''}><div class="t">${name(t, nested)}${cnt
           ? ` <span class="cnt">${EXP.has(t.id) ? '▾' : '▸'} ${cnt.total - cnt.open}/${cnt.total}</span>` : ''}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
         ${d ? `<div class="note">${esc(t.done)}</div>` : ''}${thumbs(t)}</div>${mover(t, d)}</div>`;
@@ -510,11 +525,15 @@ async function move(id, parent) {
   catch (e) { alert(e.message); }
   loadTasks();
 }
-async function finish(id) {
+const PEND = new Set();
+async function finish(id, btn) {
   const note = prompt('Юу хийж дуусгасан бэ? (заавал биш)');
   if (note === null) return;
-  try { await postJSON('/api/tasks/done', { id, note }); loadTasks(); }
-  catch (e) { alert(e.message); }
+  const row = btn.closest('.task');   // шууд ✓ + алга болох animation, хадгалалт ард нь явна
+  row.classList.add('done', 'bye'); btn.textContent = '✓'; btn.disabled = true; PEND.add(id);
+  try { await postJSON('/api/tasks/done', { id, note }); }
+  catch (e) { PEND.delete(id); row.classList.remove('done', 'bye'); btn.textContent = ''; btn.disabled = false; return alert(e.message); }
+  await loadTasks(); PEND.delete(id);
 }
 
 // ── Акт ──

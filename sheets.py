@@ -25,6 +25,8 @@ import json
 import base64
 import calendar
 import time
+import asyncio
+import threading
 from datetime import datetime
 
 # Railway UTC-ээр явдаг — Монголын цаг (UTC+8, зуны цаггүй). POSIX TZ тул tzdata хэрэггүй.
@@ -116,6 +118,17 @@ def _now() -> str:
 
 def _safe(row: list, idx: int) -> str:
     return row[idx] if len(row) > idx else ""
+
+
+# ponytail: нэг глобал lock — googleapiclient (httplib2) thread-safe биш, бас уншаад-бичих
+# (ID, мөрийн дугаар) зэрэг явбал эвдэрнэ. Хурдан дараалан дарахад 500 гарч байсныг засна.
+LOCK = threading.Lock()
+
+async def db(fn, *a):
+    def run():
+        with LOCK:
+            return fn(*a)
+    return await asyncio.to_thread(run)
 
 
 class SheetsClient:

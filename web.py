@@ -16,7 +16,7 @@ from aiohttp import web
 from fpdf import FPDF
 from PIL import Image, ImageOps
 
-from sheets import SHEET_ID, TAGS
+from sheets import SHEET_ID, TAGS, db
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # ponytail: эхний олдсон кирилл фонт — Railway-д fonts/DejaVuSans.ttf repo-д байх ёстой
@@ -162,7 +162,7 @@ def _range(q) -> tuple[str, str]:
 
 async def _entries(request):
     a, b = _range(request.query)
-    return a, b, await asyncio.to_thread(request.app["sheets"].get_log, a, b, request.query.get("tag", ""))
+    return a, b, await db(request.app["sheets"].get_log, a, b, request.query.get("tag", ""))
 
 
 async def log_get(request):
@@ -181,7 +181,7 @@ async def log_post(request):
         return web.json_response({"error": "Огноо буруу"}, status=400)
     # ponytail: олон мөр бичвэл мөр бүр тусдаа бичлэг
     for line in filter(None, (l.strip() for l in text.splitlines())):
-        await asyncio.to_thread(request.app["sheets"].add_log, line, date, tag)
+        await db(request.app["sheets"].add_log, line, date, tag)
     return web.json_response({"ok": True})
 
 
@@ -192,7 +192,7 @@ async def report_pdf(request):
 
 
 async def tasks_get(request):
-    return web.json_response(await asyncio.to_thread(request.app["sheets"].get_tasks))
+    return web.json_response(await db(request.app["sheets"].get_tasks))
 
 
 async def tasks_post(request):
@@ -201,7 +201,7 @@ async def tasks_post(request):
     if not text:
         return web.json_response({"error": "Хоосон байна"}, status=400)
     try:
-        tid = await asyncio.to_thread(request.app["sheets"].add_task, text, parent)
+        tid = await db(request.app["sheets"].add_task, text, parent)
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"id": tid})
@@ -209,7 +209,7 @@ async def tasks_post(request):
 
 async def tasks_done(request):
     d = await request.json()
-    text = await asyncio.to_thread(request.app["sheets"].finish_task,
+    text = await db(request.app["sheets"].finish_task,
                                    d.get("id", ""), (d.get("note") or "").strip())
     if text is None:
         return web.json_response({"error": "Ажил олдсонгүй"}, status=404)
@@ -222,7 +222,7 @@ async def log_tag(request):
     s = request.app["sheets"]
     fn, val = (s.set_log_parent, d["parent"]) if "parent" in d else (s.set_log_tag, (d.get("tag") or "").strip())
     try:
-        await asyncio.to_thread(fn, int(d.get("row", 0)), d.get("text", ""), val or "")
+        await db(fn, int(d.get("row", 0)), d.get("text", ""), val or "")
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"ok": True})
@@ -244,7 +244,7 @@ async def task_photo(request):
         with open(os.path.join(PHOTO_DIR, names[-1]), "wb") as fh:
             fh.write(img)
     try:
-        await asyncio.to_thread(request.app["sheets"].add_task_photos, data.get("id", ""), names)
+        await db(request.app["sheets"].add_task_photos, data.get("id", ""), names)
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=404)
     return web.json_response({"photos": names})
@@ -261,7 +261,7 @@ async def photo_get(request):
 async def tasks_move(request):
     d = await request.json()
     try:
-        await asyncio.to_thread(request.app["sheets"].move_task,
+        await db(request.app["sheets"].move_task,
                                 d.get("id", ""), (d.get("parent") or "").strip())
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
@@ -285,7 +285,7 @@ async def chat_post(request):
 
 async def acts_get(request):
     return web.json_response(
-        await asyncio.to_thread(request.app["sheets"].get_acts, request.query.get("q", "")))
+        await db(request.app["sheets"].get_acts, request.query.get("q", "")))
 
 
 async def act_post(request):
@@ -299,7 +299,7 @@ async def act_post(request):
     raw = [p.file.read() for p in data.getall("photos", []) if getattr(p, "filename", "")]
     photos = await asyncio.to_thread(lambda: [shrink(r) for r in raw])
     date = datetime.now().strftime("%Y-%m-%d %H:%M")
-    act_id = await asyncio.to_thread(sheets.next_act_id)
+    act_id = await db(sheets.next_act_id)
     pdf = await asyncio.to_thread(build_act_pdf, act_id, date, f, items, photos)
     summary = ", ".join(f"{it['qty']}ш {it['item']}" for it in items)
 
@@ -312,8 +312,8 @@ async def act_post(request):
             file=discord.File(io.BytesIO(pdf), f"{act_id}.pdf"))
         link = msg.jump_url
 
-    await asyncio.to_thread(sheets.add_act, act_id, date, f, items, link)
-    await asyncio.to_thread(sheets.add_log, f"Акт {act_id}: {f['src']} → {f['dst']} — {summary}")
+    await db(sheets.add_act, act_id, date, f, items, link)
+    await db(sheets.add_log, f"Акт {act_id}: {f['src']} → {f['dst']} — {summary}")
     return _pdf(pdf, f"{act_id}.pdf", **{"X-Act-Id": act_id})
 
 

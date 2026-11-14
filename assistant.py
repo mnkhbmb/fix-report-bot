@@ -7,7 +7,7 @@ import json
 import os
 from datetime import datetime
 
-from sheets import TAGS
+from sheets import TAGS, db
 
 MODEL = "claude-opus-5-5"
 WD = ["Даваа", "Мягмар", "Лхагва", "Пүрэв", "Баасан", "Бямба", "Ням"]
@@ -114,7 +114,7 @@ async def chat(sheets, history: list[dict]) -> tuple[str, list]:
             if b.type != "tool_use":
                 continue
             try:
-                out, err = await asyncio.to_thread(run_tool, sheets, b.name, b.input, actions), False
+                out, err = await db(run_tool, sheets, b.name, b.input, actions), False
             except Exception as e:   # алдааг Claude-д буцааж, өөрөө засуулна
                 out, err = f"Алдаа: {e}", True
             results.append({"type": "tool_result", "tool_use_id": b.id, "content": out, "is_error": err})
