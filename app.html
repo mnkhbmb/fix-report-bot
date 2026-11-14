@@ -96,7 +96,13 @@
   /* Доод таб */
   nav { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line);
         padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); display: flex; justify-content: center; }
-  nav .in { max-width: 560px; width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); }
+  nav .in { max-width: 560px; width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); }
+  /* Туслах */
+  .msg { padding: 10px 12px; border-radius: 14px; margin-bottom: 8px; max-width: 88%; white-space: pre-wrap; }
+  .msg.user { background: var(--accent); color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+  .msg.assistant { background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .ask { position: sticky; bottom: 76px; }
+  #mic.rec { background: var(--danger); color: #fff; }
   nav button { border: 0; background: none; color: var(--muted); padding: 6px 0; font-size: 12px; }
   nav button span { display: block; font-size: 22px; }
   nav button.on { color: var(--accent); font-weight: 600; }
@@ -157,6 +163,19 @@
     </div>
   </section>
 
+  <!-- ═══ ТУСЛАХ ═══ -->
+  <section id="tab-ai" hidden>
+    <div id="chat"></div>
+    <div class="card ask">
+      <textarea id="aiText" rows="2" placeholder="жш: Дархан руу 12 компьютер өгсөн, акт бэлд"></textarea>
+      <div class="line">
+        <button class="btn soft" id="mic" type="button" onclick="listen()" aria-label="Ярих">🎤</button>
+        <button class="btn" id="aiSend" style="flex:1" onclick="askAI()">Илгээх</button>
+        <button class="btn soft" type="button" onclick="resetChat()" aria-label="Шинэ яриа">↺</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ═══ АКТ ═══ -->
   <section id="tab-act" hidden>
     <div id="actDone" class="done-box" hidden></div>
@@ -208,6 +227,7 @@
   <button data-tab="log" class="on"><span>📝</span>Тайлан</button>
   <button data-tab="tasks"><span>✅</span>Ажлууд</button>
   <button data-tab="act"><span>📄</span>Акт</button>
+  <button data-tab="ai"><span>🎤</span>Туслах</button>
 </div></nav>
 
 <script>
@@ -234,14 +254,70 @@ function download(blob, name) {
 }
 
 // ── Табууд ──
-const titles = { log: '📝 Тайлан', tasks: '✅ Ажлууд', act: '📄 Акт' };
+const titles = { log: '📝 Тайлан', tasks: '✅ Ажлууд', act: '📄 Акт', ai: '🎤 Туслах' };
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => show(b.dataset.tab));
 function show(tab) {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  ['log', 'tasks', 'act'].forEach(t => $('#tab-' + t).hidden = t !== tab);
+  ['log', 'tasks', 'act', 'ai'].forEach(t => $('#tab-' + t).hidden = t !== tab);
   $('#title').textContent = titles[tab];
-  ({ log: loadLog, tasks: loadTasks, act: searchActs })[tab]();
-  scrollTo(0, 0);
+  ({ log: loadLog, tasks: loadTasks, act: searchActs, ai: drawChat })[tab]();
+  scrollTo(0, tab === 'ai' ? document.body.scrollHeight : 0);
+}
+
+// ── Туслах (яриа утсан дээрээ л хадгалагдана) ──
+let chat = []; try { chat = JSON.parse(localStorage.chat || '[]'); } catch {}
+const saveChat = () => { try { localStorage.chat = JSON.stringify(chat.slice(-40)); } catch {} };
+function drawChat() {
+  $('#chat').innerHTML = chat.length ? chat.map(m => `<div class="msg ${m.role}">${esc(m.content)}</div>`).join('')
+    : '<p class="muted">Юу хийснээ, хийх ажлаа ярьж эсвэл бичээрэй. Жш: "Crystal-д домофон судалсан, гаражийн камер хийх ажил нэм", "Өчигдрийн тайланг PDF болго".</p>';
+}
+function resetChat() { if (confirm('Шинэ яриа эхлэх үү?')) { chat = []; saveChat(); drawChat(); } }
+async function askAI() {
+  const t = $('#aiText').value.trim();
+  if (!t) return;
+  chat.push({ role: 'user', content: t }); $('#aiText').value = ''; drawChat();
+  const b = $('#aiSend'); b.disabled = true; b.textContent = 'Бодож байна...';
+  scrollTo(0, document.body.scrollHeight);
+  try {
+    const r = await (await postJSON('/api/chat', { messages: chat })).json();
+    chat.push({ role: 'assistant', content: r.text });
+    for (const a of r.actions) await doAction(a);
+  } catch (e) { chat.push({ role: 'assistant', content: '⚠️ ' + e.message }); }
+  saveChat(); drawChat(); b.disabled = false; b.textContent = 'Илгээх';
+  scrollTo(0, document.body.scrollHeight);
+}
+async function doAction(a) {
+  if (a.type === 'report_pdf') {
+    const qs = `from=${a.start}&to=${a.end}&tag=${encodeURIComponent(a.tag || '')}`;
+    download(await (await api('/api/report.pdf?' + qs)).blob(), `Тайлан-${a.start}_${a.end}.pdf`);
+  }
+  if (a.type === 'prepare_act') {   // маягтыг бөглөөд Акт таб руу — зураг нэмээд өөрөө илгээнэ
+    const f = $('#actForm');
+    ['src', 'dst', 'giver', 'receiver', 'notes'].forEach(k => f.elements[k].value = a[k] || '');
+    $('#items').innerHTML = '';
+    (a.items || []).forEach(it => {
+      addItem();
+      const d = $('#items').lastElementChild;
+      d.querySelector('[name=item]').value = it.item || '';
+      d.querySelector('[name=qty]').value = it.qty || 1;
+      d.querySelector('[name=serial]').value = it.serial || '';
+    });
+    if (!$('#items').children.length) addItem();
+    syncChips(); summary(); show('act');
+  }
+}
+// 🎤 Chrome-ийн дуу таних (mn-MN). Дэмжихгүй бол утасны гарын 🎤-г ашиглана.
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) $('#mic').hidden = true;
+let rec;
+function listen() {
+  if (rec) return rec.stop();
+  rec = new SR(); rec.lang = 'mn-MN'; rec.interimResults = true;
+  const base = $('#aiText').value ? $('#aiText').value + ' ' : '';
+  rec.onresult = e => $('#aiText').value = base + [...e.results].map(r => r[0].transcript).join('');
+  rec.onend = () => { rec = null; $('#mic').classList.remove('rec'); };
+  rec.onerror = e => { if (e.error !== 'aborted') alert('Дуу таних: ' + e.error); };
+  $('#mic').classList.add('rec'); rec.start();
 }
 
 // ── Тайлан ──

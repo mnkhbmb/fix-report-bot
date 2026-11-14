@@ -24,7 +24,13 @@ import re
 import json
 import base64
 import calendar
+import time
 from datetime import datetime
+
+# Railway UTC-ээр явдаг — Монголын цаг (UTC+8, зуны цаггүй). POSIX TZ тул tzdata хэрэггүй.
+if hasattr(time, "tzset"):   # ponytail: Windows-д tzset алга, тэнд локал цаг аль хэдийн зөв
+    os.environ.setdefault("TZ", "ULAT-8")
+    time.tzset()
 from typing import Optional
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build

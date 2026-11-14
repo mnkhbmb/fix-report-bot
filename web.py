@@ -218,6 +218,21 @@ async def tasks_move(request):
     return web.json_response({"ok": True})
 
 
+async def chat_post(request):
+    import assistant
+    if not assistant.enabled():
+        return web.json_response({"error": "Railway дээр ANTHROPIC_API_KEY тохируулаагүй байна"}, status=503)
+    history = (await request.json()).get("messages") or []
+    history = [m for m in history if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str)]
+    if not history or history[-1]["role"] != "user":
+        return web.json_response({"error": "Хоосон байна"}, status=400)
+    try:
+        text, actions = await assistant.chat(request.app["sheets"], history)
+    except Exception as e:
+        return web.json_response({"error": f"Туслах алдаа: {e}"}, status=502)
+    return web.json_response({"text": text, "actions": actions})
+
+
 async def acts_get(request):
     return web.json_response(
         await asyncio.to_thread(request.app["sheets"].get_acts, request.query.get("q", "")))
@@ -263,6 +278,7 @@ def make_app(sheets, bot=None) -> web.Application:
     app.router.add_post("/api/tasks", tasks_post)
     app.router.add_post("/api/tasks/done", tasks_done)
     app.router.add_post("/api/tasks/move", tasks_move)
+    app.router.add_post("/api/chat", chat_post)
     app.router.add_get("/api/acts", acts_get)
     app.router.add_post("/api/act", act_post)
     return app

@@ -1,5 +1,5 @@
 """Вэб API-г санах ойн хуурамч sheet-ээр шалгана (Google, Discord хүрэхгүй)."""
-import asyncio, io
+import asyncio, io, json
 from aiohttp import FormData
 from aiohttp.test_utils import TestClient, TestServer
 from PIL import Image
@@ -89,6 +89,20 @@ async def main():
         r = await c.get("/api/report.pdf?month=2026-11", headers=H)
         rep = await r.read(); assert rep.startswith(b"%PDF")
         open("test_report.pdf", "wb").write(rep)
+    # 🎤 туслахын tool-ууд (Claude дуудахгүй — зөвхөн гүйцэтгэл)
+    import assistant
+    acts = []
+    tid = assistant.run_tool(s, "add_task", {"text": "Гаражийн камер"}, acts).split(": ")[1]
+    assert any(t["id"] == tid for t in json.loads(assistant.run_tool(s, "list_tasks", {}, acts)))
+    assert assistant.run_tool(s, "finish_task", {"id": "T-9999"}, acts) == "Ажил олдсонгүй"
+    assistant.run_tool(s, "add_log", {"text": "Viot уулзалт", "date": "2026-11-12"}, acts)
+    assert json.loads(assistant.run_tool(s, "get_log", {"start": "2026-11-12", "end": "2026-11-12"}, acts))[0]["tag"] == "Viot"
+    assistant.run_tool(s, "prepare_act", {"src": "10-цирк", "dst": "Дархан", "items": [{"item": "PC", "qty": 12}]}, acts)
+    assert acts[0]["type"] == "prepare_act" and acts[0]["items"][0]["qty"] == 12
+    try:
+        assistant.run_tool(s, "add_log", {"text": "x", "date": "13/11"}, acts); assert False
+    except ValueError:
+        pass
     print("ok — test_act.pdf, test_report.pdf")
 
 if __name__ == "__main__":
