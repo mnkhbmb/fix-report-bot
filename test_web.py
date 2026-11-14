@@ -129,6 +129,13 @@ async def main():
         s.set_log_tag(e["row"], "өөр текст", "Lof"); assert False   # мөр шилжсэн бол бичихгүй
     except ValueError:
         pass
+    # тайлангийн 2 бичлэг нэгтгэх / салгах
+    s.add_log("Viot дизайн", "2026-11-12")
+    kid = [x for x in s.get_log("2026-11-12", "2026-11-12") if x["text"] == "Viot дизайн"][0]
+    s.set_log_parent(kid["row"], kid["text"], e["text"])
+    assert [x["parent"] for x in s.get_log("2026-11-12", "2026-11-12")] == ["", "Viot уулзалт"]
+    s.set_log_parent(kid["row"], kid["text"], "")
+    assert s.get_log("2026-11-12", "2026-11-12")[1]["parent"] == ""
     assistant.run_tool(s, "prepare_act", {"src": "10-цирк", "dst": "Дархан", "items": [{"item": "PC", "qty": 12}]}, acts)
     assert acts[0]["type"] == "prepare_act" and acts[0]["items"][0]["qty"] == 12
     try:

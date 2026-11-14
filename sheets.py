@@ -57,7 +57,7 @@ ACT_HEADERS = [
     "Зүйл", "Тоо", "Серийн дугаар", "Тэмдэглэл", "Discord"
 ]
 TAB_LOG = "Тайлан"     # өдөр тутмын хийсэн ажил
-LOG_HEADERS = ["Огноо", "Цаг", "Бичлэг", "Tag"]
+LOG_HEADERS = ["Огноо", "Цаг", "Бичлэг", "Tag", "Эх"]   # Эх = нэгтгэсэн эх бичлэгийн текст
 # ponytail: tag нэр текстэд байвал автомат (жш "Lof 4 орсон" → Lof). LOG_TAGS env-ээр өөрчилнө
 TAGS = [t.strip() for t in os.environ.get("LOG_TAGS", "Lof,Viot").split(",") if t.strip()]
 
@@ -593,17 +593,24 @@ class SheetsClient:
             t = _safe(r, 3) or auto_tag(text)
             t = "" if t == "-" else t   # "-" = гараар tag-гүй болгосон
             if start <= d <= end and (not tag or t.lower() == tag.lower()):
-                out.append({"row": n, "date": d, "time": _safe(r, 1), "text": text, "tag": t})
+                out.append({"row": n, "date": d, "time": _safe(r, 1), "text": text, "tag": t, "parent": _safe(r, 4)})
         return out
 
     def set_log_tag(self, row: int, text: str, tag: str):
         """Бичлэгийн tag-ийг солино. text-ээр мөрийг давхар шалгана (мөр шилжсэн бол буруу мөрөнд бичихгүй).
         tag='' → автомат, '-' → tag-гүй."""
         # ponytail: мөрийн дугаараар хаяглана — Тайлан табаас мөр устгавал хуучин дугаар буруудна, text шалгалт хамгаална
+        self._set_log_cell(row, text, "D", tag)
+
+    def set_log_parent(self, row: int, text: str, parent: str):
+        """Бичлэгийг нэг өдрийн өөр бичлэгийн доор оруулна. parent = эх бичлэгийн текст ('' → салгана)."""
+        self._set_log_cell(row, text, "E", parent)
+
+    def _set_log_cell(self, row: int, text: str, col: str, value: str):
         rows = self._get_rows(TAB_LOG)
         if not (2 <= row <= len(rows)) or _safe(rows[row - 1], 2) != text:
             raise ValueError("Бичлэг олдсонгүй — хуудсаа шинэчилнэ үү")
-        self._update_cell(TAB_LOG, row, "D", tag)
+        self._update_cell(TAB_LOG, row, col, value)
 
     def add_task(self, text: str, parent: str = "") -> str:
         """parent өгвөл sub ажил — parent нь байгаа main ажил байх ёстой."""

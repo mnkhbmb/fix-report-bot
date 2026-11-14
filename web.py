@@ -217,10 +217,12 @@ async def tasks_done(request):
 
 
 async def log_tag(request):
+    """{row, text, tag} → tag солих; {row, text, parent} → өөр бичлэгийн доор нэгтгэх/салгах."""
     d = await request.json()
+    s = request.app["sheets"]
+    fn, val = (s.set_log_parent, d["parent"]) if "parent" in d else (s.set_log_tag, (d.get("tag") or "").strip())
     try:
-        await asyncio.to_thread(request.app["sheets"].set_log_tag, int(d.get("row", 0)),
-                                d.get("text", ""), (d.get("tag") or "").strip())
+        await asyncio.to_thread(fn, int(d.get("row", 0)), d.get("text", ""), val or "")
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"ok": True})
