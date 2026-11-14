@@ -33,6 +33,8 @@
   .tag { display: inline-block; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent);
          padding: 1px 7px; border-radius: 999px; margin-right: 6px; }
   .task.sub { margin-left: 30px; }
+  select.mv { flex: none; width: 40px; padding: 4px 0; text-align: center; font-size: 16px;
+              background: var(--chip); border-color: transparent; color: var(--accent); }
   select { appearance: none; }
   input, textarea, select { width: 100%; padding: 12px; font-size: 16px; color: var(--text);
                     background: var(--bg); border: 1px solid var(--line); border-radius: 10px; outline: none; }
@@ -308,10 +310,17 @@ async function loadTasks() {
     const open = all.filter(t => !isDone(t)), done = all.filter(isDone).reverse();
     // sub-ийн main нь харагдахгүй (дууссан) бол "Main › " гэж угтвар тавина
     const name = (t, nested) => (!nested && byId[t.parent] ? `<span class="note">${esc(byId[t.parent].text)} › </span>` : '') + esc(t.text);
+    const mains = open.filter(t => !t.parent);
+    // ⇄ — өөр main-ийн доор зөөх / дахин main болгох (sub-тай main-ийг сервер татгалзана)
+    const mover = t => `<select class="mv" aria-label="Зөөх" onchange="move('${esc(t.id)}', this.value)">
+        <option value="_" selected hidden>⇄</option>
+        ${t.parent ? '<option value="">↑ Main болгох</option>' : ''}
+        ${mains.filter(m => m.id !== t.id && m.id !== t.parent).map(m => `<option value="${esc(m.id)}">↳ ${esc(m.text)}</option>`).join('')}
+      </select>`;
     const row = (t, d, nested) => `<div class="task${d ? ' done' : ''}${nested ? ' sub' : ''}">
         <button class="check" ${d ? 'disabled' : `onclick="finish('${esc(t.id)}')"`} aria-label="Дууссан">${d ? '✓' : ''}</button>
-        <div><div class="t">${name(t, nested)}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
-        ${d ? `<div class="note">${esc(t.done)}</div>` : ''}</div></div>`;
+        <div style="flex:1"><div class="t">${name(t, nested)}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
+        ${d ? `<div class="note">${esc(t.done)}</div>` : ''}</div>${d ? '' : mover(t)}</div>`;
     const tops = open.filter(t => !open.some(m => m.id === t.parent));
     $('#taskList').innerHTML = tops.length ? tops.map(m =>
       row(m, false, false) + open.filter(s => s.parent === m.id).map(s => row(s, false, true)).join('')
@@ -331,6 +340,11 @@ async function addTask() {
   if (kind() === 'sub' && !parent) return alert('Sub ажлын Main ажлыг сонгоно уу');
   try { await postJSON('/api/tasks', { text: t, parent }); $('#taskText').value = ''; loadTasks(); }
   catch (e) { alert(e.message); }
+}
+async function move(id, parent) {
+  try { await postJSON('/api/tasks/move', { id, parent }); }
+  catch (e) { alert(e.message); }
+  loadTasks();
 }
 async function finish(id) {
   const note = prompt('Юу хийж дуусгасан бэ? (заавал биш)');

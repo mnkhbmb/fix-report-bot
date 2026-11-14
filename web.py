@@ -208,6 +208,16 @@ async def tasks_done(request):
     return web.json_response({"ok": True})
 
 
+async def tasks_move(request):
+    d = await request.json()
+    try:
+        await asyncio.to_thread(request.app["sheets"].move_task,
+                                d.get("id", ""), (d.get("parent") or "").strip())
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    return web.json_response({"ok": True})
+
+
 async def acts_get(request):
     return web.json_response(
         await asyncio.to_thread(request.app["sheets"].get_acts, request.query.get("q", "")))
@@ -252,6 +262,7 @@ def make_app(sheets, bot=None) -> web.Application:
     app.router.add_get("/api/tasks", tasks_get)
     app.router.add_post("/api/tasks", tasks_post)
     app.router.add_post("/api/tasks/done", tasks_done)
+    app.router.add_post("/api/tasks/move", tasks_move)
     app.router.add_get("/api/acts", acts_get)
     app.router.add_post("/api/act", act_post)
     return app

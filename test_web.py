@@ -14,6 +14,9 @@ class MemSheets(sh.SheetsClient):
     def _get_rows(self, tab, sheet_id=None): return [list(r) for r in self.data[tab]]
     def _append_row(self, tab, row, sheet_id=None): self.data[tab].append(list(row))
     def _update_row(self, tab, n, values, sheet_id=None): self.data[tab][n - 1] = list(values)
+    def _update_cell(self, tab, n, col, value, sheet_id=None):
+        r = self.data[tab][n - 1]; i = ord(col) - 65
+        r += [""] * (i + 1 - len(r)); r[i] = value
     def add_act(self, act_id, date, f, items, link):
         for it in items:
             self._append_row(sh.TAB_ACT, [act_id, date, f["src"], f["dst"], f["giver"], f["receiver"],
@@ -53,6 +56,15 @@ async def main():
         sub = (await (await c.post("/api/tasks", json={"text": "SSD шалгах", "parent": tid}, headers=H)).json())["id"]
         assert (await c.post("/api/tasks", json={"text": "x", "parent": sub}, headers=H)).status == 400   # sub-ийн sub болохгүй
         assert (await c.post("/api/tasks", json={"text": "x", "parent": "T-9999"}, headers=H)).status == 400
+        # main-ийг өөр main-ийн sub болгох / буцаах
+        mv = lambda i, p: c.post("/api/tasks/move", json={"id": i, "parent": p}, headers=H)
+        other = (await (await c.post("/api/tasks", json={"text": "Kiosk авах"}, headers=H)).json())["id"]
+        assert (await mv(other, tid)).status == 200
+        assert {t["id"]: t for t in s.get_tasks()}[other]["parent"] == tid
+        assert (await mv(tid, other)).status == 400      # sub-тай main зөөгдөхгүй / sub-ийн доор орохгүй
+        assert (await mv(other, other)).status == 400
+        assert (await mv(other, "")).status == 200
+        assert {t["id"]: t for t in s.get_tasks()}[other]["parent"] == ""
         assert (await c.post("/api/tasks/done", json={"id": sub, "note": "7 ширхэг"}, headers=H)).status == 200
         assert s.log[-1]["text"] == "Дууссан: Дархан руу PC бэлдэх › SSD шалгах — 7 ширхэг"
         assert (await c.post("/api/tasks/done", json={"id": tid, "note": "12 ширхэг бэлэн"}, headers=H)).status == 200

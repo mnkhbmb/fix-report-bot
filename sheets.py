@@ -602,6 +602,18 @@ class SheetsClient:
         return [dict(zip(keys, [_safe(r, i) for i in range(7)]))
                 for r in self._get_rows(TAB_TASK)[1:] if _safe(r, 0)]
 
+    def move_task(self, tid: str, parent: str):
+        """Ажлыг өөр main-ийн sub болгоно (parent='' → дахин main). Ганц түвшин."""
+        tasks = {t["id"]: t for t in self.get_tasks()}
+        if tid not in tasks:
+            raise ValueError("Ажил олдсонгүй")
+        if parent:
+            if parent == tid or parent not in tasks or tasks[parent]["parent"]:
+                raise ValueError("Main ажил олдсонгүй")
+            if any(t["parent"] == tid for t in tasks.values()):
+                raise ValueError("Энэ ажил өөрөө sub-тай — эхлээд sub-уудыг нь зөөнө үү")
+        self._update_cell(TAB_TASK, self._find_row(TAB_TASK, 0, tid), "G", parent)
+
     def finish_task(self, tid: str, note: str) -> Optional[str]:
         """Ажлыг дуусгаж, тайланд бичнэ ("Main › Sub" хэлбэрээр). Ажлын текстийг буцаана."""
         tasks = {t["id"]: t for t in self.get_tasks()}
