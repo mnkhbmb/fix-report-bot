@@ -56,6 +56,10 @@
   .day h3 { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
   .entry { padding: 8px 10px; background: var(--bg); border-radius: 8px; margin-bottom: 6px; white-space: pre-wrap; }
   .entry time { color: var(--muted); font-size: 12px; margin-right: 6px; }
+  .entry.fin { box-shadow: inset 3px 0 0 var(--ok); }
+  .entry.fin .ok { color: var(--ok); font-weight: 700; margin-right: 4px; }
+  .fold { cursor: pointer; }
+  .cnt { font-size: 12px; color: var(--accent); background: var(--accent-soft); padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
 
   /* Ажлууд */
   .task { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
@@ -353,7 +357,8 @@ async function loadLog() {
     const keys = Object.keys(days).sort().reverse();
     $('#logList').innerHTML = keys.length ? keys.map(d =>
       `<div class="day"><h3>${esc(days[d][0].label)}</h3>` +
-      days[d].map(e => { LOG[e.row] = e; return `<div class="entry" style="display:flex;gap:8px;align-items:center;white-space:normal"><div style="flex:1;white-space:pre-wrap"><time>${esc(e.time)}</time>${e.tag ? `<span class="tag">${esc(e.tag)}</span>` : ''}${esc(e.text)}</div>
+      days[d].map(e => { LOG[e.row] = e; const fin = e.text.startsWith('Дууссан: ');
+        return `<div class="entry${fin ? ' fin' : ''}" style="display:flex;gap:8px;align-items:center;white-space:normal"><div style="flex:1;white-space:pre-wrap"><time>${esc(e.time)}</time>${e.tag ? `<span class="tag">${esc(e.tag)}</span>` : ''}${fin ? '<span class="ok">✓</span>' + esc(e.text.slice(9)) : esc(e.text)}</div>
         <select class="mv" aria-label="Tag солих" onchange="retag(${e.row}, this.value)">
           <option value="_" selected hidden>#</option>${TAG_OPTS}
           <option value="+">＋ Шинэ tag...</option><option value="">↺ Автомат</option><option value="-">✕ Tag-гүй</option>
@@ -389,6 +394,13 @@ async function reportPdf(btn) {
 
 // ── Ажлууд ──
 const kind = seg('kind', v => $('#parent').hidden = v !== 'sub');
+const EXP = new Set();   // нээлттэй main-ууд (дахин ачаалахад хадгалагдана)
+function toggle(id, el) {
+  const box = document.querySelector(`.subs[data-for="${CSS.escape(id)}"]`);
+  EXP.has(id) ? EXP.delete(id) : EXP.add(id);
+  if (box) box.hidden = !EXP.has(id);
+  const c = el.querySelector('.cnt'); c.textContent = (EXP.has(id) ? '▾' : '▸') + c.textContent.slice(1);
+}
 async function loadTasks() {
   try {
     const all = await (await api('/api/tasks')).json();
@@ -404,14 +416,18 @@ async function loadTasks() {
         ${t.parent ? '<option value="">↑ Main болгох</option>' : ''}
         ${mains.filter(m => m.id !== t.id && m.id !== t.parent).map(m => `<option value="${esc(m.id)}">↳ ${esc(m.text)}</option>`).join('')}
       </select>`;
-    const row = (t, d, nested) => `<div class="task${d ? ' done' : ''}${nested ? ' sub' : ''}">
+    // cnt = {open, total} — sub-тай main бол дарахад sub-ууд нээгдэнэ
+    const row = (t, d, nested, cnt) => `<div class="task${d ? ' done' : ''}${nested ? ' sub' : ''}">
         <button class="check" ${d ? 'disabled' : `onclick="finish('${esc(t.id)}')"`} aria-label="Дууссан">${d ? '✓' : ''}</button>
-        <div style="flex:1"><div class="t">${name(t, nested)}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
+        <div style="flex:1"${cnt ? ` class="fold" onclick="toggle('${esc(t.id)}', this)"` : ''}><div class="t">${name(t, nested)}${cnt
+          ? ` <span class="cnt">${EXP.has(t.id) ? '▾' : '▸'} ${cnt.total - cnt.open}/${cnt.total}</span>` : ''}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
         ${d ? `<div class="note">${esc(t.done)}</div>` : ''}</div>${d ? '' : mover(t)}</div>`;
     const tops = open.filter(t => !open.some(m => m.id === t.parent));
-    $('#taskList').innerHTML = tops.length ? tops.map(m =>
-      row(m, false, false) + open.filter(s => s.parent === m.id).map(s => row(s, false, true)).join('')
-    ).join('') : '<p class="muted">Хийх ажил алга 🎉</p>';
+    $('#taskList').innerHTML = tops.length ? tops.map(m => {
+      const subs = open.filter(s => s.parent === m.id), total = all.filter(s => s.parent === m.id).length;
+      return row(m, false, false, total ? { open: subs.length, total } : null) + (subs.length
+        ? `<div class="subs" data-for="${esc(m.id)}"${EXP.has(m.id) ? '' : ' hidden'}>${subs.map(s => row(s, false, true)).join('')}</div>` : '');
+    }).join('') : '<p class="muted">Хийх ажил алга 🎉</p>';
     $('#doneList').innerHTML = done.map(t => row(t, true, false)).join('');
     $('#doneWrap').hidden = !done.length;
     const keep = $('#parent').value;

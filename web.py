@@ -108,7 +108,8 @@ def build_report_pdf(title: str, entries: list[dict]) -> bytes:
     pdf.cell(0, 12, f"{title} — Ажлын тайлан", align="C", new_x="LMARGIN", new_y="NEXT")
     by_day = defaultdict(list)
     for e in entries:
-        by_day[e["date"]].append((f"[{e['tag']}] " if e.get("tag") else "") + e["text"])
+        text = "✓ " + e["text"][9:] if e["text"].startswith("Дууссан: ") else e["text"]
+        by_day[e["date"]].append((f"[{e['tag']}] " if e.get("tag") else "") + text)
     for day in sorted(by_day):
         pdf.ln(3)
         pdf.set_font_size(12)
