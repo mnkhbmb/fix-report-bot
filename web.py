@@ -14,7 +14,7 @@ from aiohttp import web
 from fpdf import FPDF
 from PIL import Image, ImageOps
 
-from sheets import TAGS
+from sheets import SHEET_ID, TAGS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # ponytail: эхний олдсон кирилл фонт — Railway-д fonts/DejaVuSans.ttf repo-д байх ёстой
@@ -31,7 +31,8 @@ BRANCHES = ["түмэн", "2-спортын-төв-ордон", "3-энхтай�
 with open(os.path.join(HERE, "app.html"), encoding="utf-8") as fh:
     APP_HTML = fh.read().replace(
         "{{BRANCHES}}", "".join(f'<option value="{escape(b)}">' for b in BRANCHES)).replace(
-        "{{TAGS}}", "".join(f'<option value="{escape(t)}">{escape(t)}</option>' for t in TAGS))
+        "{{TAGS}}", "".join(f'<option value="{escape(t)}">{escape(t)}</option>' for t in TAGS)).replace(
+        "{{SHEET_URL}}", f"https://docs.google.com/spreadsheets/d/{SHEET_ID}")
 WD = ["Даваа", "Мягмар", "Лхагва", "Пүрэв", "Баасан", "Бямба", "Ням"]
 
 
