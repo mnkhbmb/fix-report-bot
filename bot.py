@@ -82,7 +82,8 @@ class RepairBot(discord.Client):
         self.sheets = SheetsClient()
 
     async def setup_hook(self):
-        pass
+        from web import start_web
+        await start_web(self.sheets, bot=self)
 
 
 client = RepairBot()

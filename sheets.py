@@ -45,6 +45,15 @@ TAB_REP = "Repairs"
 TAB_FIX = "Fixed"
 TAB_SHP = "Shipments"
 TAB_SWAP = "Солилт"
+TAB_ACT = "Акт"   # хүлээлцэх акт — зүйл бүр нэг мөр (серийн дугаараар хайхад хялбар)
+ACT_HEADERS = [
+    "Акт ID", "Огноо", "Хаанаас", "Хаашаа", "Өгсөн", "Хүлээн авсан",
+    "Зүйл", "Тоо", "Серийн дугаар", "Тэмдэглэл", "Discord"
+]
+TAB_LOG = "Тайлан"     # өдөр тутмын хийсэн ажил
+LOG_HEADERS = ["Огноо", "Цаг", "Бичлэг"]
+TAB_TASK = "Ажлууд"    # хийх ажлын жагсаалт
+TASK_HEADERS = ["ID", "Ажил", "Төлөв", "Нэмсэн", "Дууссан", "Тэмдэглэл"]
 # Тооцоо нь салбар бүрт тусдаа tab үүснэ: "Тооцоо-{branch}"
 TOO_PREFIX = "Тооцоо-"
 # Агуулах бас салбар бүрт тусдаа tab: "Агуулах-{branch}"
@@ -127,11 +136,16 @@ class SheetsClient:
 
     # ── Дотоод тусламж ────────────────────────────────────────────────────────
 
+    _BASE_TABS = [
+        (TAB_REP, REP_HEADERS), (TAB_FIX, FIX_HEADERS), (TAB_SHP, SHP_HEADERS),
+        (TAB_ACT, ACT_HEADERS), (TAB_LOG, LOG_HEADERS), (TAB_TASK, TASK_HEADERS),
+    ]
+
     def _ensure_tabs(self):
         # Засварын sheet — Repairs / Fixed / Shipments
         meta = self.svc.get(spreadsheetId=SHEET_ID).execute()
         existing = {s["properties"]["title"] for s in meta["sheets"]}
-        new_tabs = [t for t in [TAB_REP, TAB_FIX, TAB_SHP] if t not in existing]
+        new_tabs = [t for t, _ in self._BASE_TABS if t not in existing]
         if new_tabs:
             self.svc.batchUpdate(
                 spreadsheetId=SHEET_ID,
@@ -139,9 +153,7 @@ class SheetsClient:
                     {"addSheet": {"properties": {"title": t}}} for t in new_tabs
                 ]}
             ).execute()
-        for tab, headers in [
-            (TAB_REP, REP_HEADERS), (TAB_FIX, FIX_HEADERS), (TAB_SHP, SHP_HEADERS)
-        ]:
+        for tab, headers in self._BASE_TABS:
             self._ensure_header(tab, headers)
 
     def _ensure_tab(self, tab: str, headers: list, sheet_id: str = SHEET_ID):
@@ -526,6 +538,63 @@ class SheetsClient:
             "reason":  reason,
             "remaining": adj["new_qty"]
         }
+
+    # ── Акт ──────────────────────────────────────────────────────────────────
+
+    def next_act_id(self) -> str:
+        # ponytail: хоёр акт яг зэрэг ирвэл ID давхцаж болно — ачаалал ихсэвэл lock нэм
+        return self._next_id(TAB_ACT, "ACT")
+
+    def add_act(self, act_id: str, date: str, f: dict, items: list[dict], link: str):
+        rows = [[act_id, date, f["src"], f["dst"], f["giver"], f["receiver"],
+                 it["item"], str(it["qty"]), it["serial"], f["notes"], link]
+                for it in items]
+        self.svc.values().append(
+            spreadsheetId=SHEET_ID,
+            range=f"{TAB_ACT}!A:A",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": rows}
+        ).execute()
+
+    def get_acts(self, q: str = "") -> list[dict]:
+        """Акт мөрүүд (шинэ нь эхэндээ). q — аль ч баганад агуулагдах текст."""
+        q = q.strip().lower()
+        rows = self._get_rows(TAB_ACT)[1:]
+        hit = [r for r in rows if r and (not q or q in " ".join(r).lower())]
+        return [dict(zip(ACT_HEADERS, r + [""] * len(ACT_HEADERS))) for r in reversed(hit)][:200]
+
+    # ── Тайлан / Ажлууд ───────────────────────────────────────────────────────
+
+    def add_log(self, text: str):
+        now = datetime.now()
+        self._append_row(TAB_LOG, [now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), text])
+
+    def get_log(self, month: str) -> list[dict]:
+        """month='2026-11' → тэр сарын бичлэгүүд."""
+        return [{"date": _safe(r, 0), "time": _safe(r, 1), "text": _safe(r, 2)}
+                for r in self._get_rows(TAB_LOG)[1:] if _safe(r, 0).startswith(month)]
+
+    def add_task(self, text: str) -> str:
+        tid = self._next_id(TAB_TASK, "T")
+        self._append_row(TAB_TASK, [tid, text, "Хийх", _now(), "", ""])
+        return tid
+
+    def get_tasks(self) -> list[dict]:
+        keys = ["id", "text", "status", "created", "done", "note"]
+        return [dict(zip(keys, [_safe(r, i) for i in range(6)]))
+                for r in self._get_rows(TAB_TASK)[1:] if _safe(r, 0)]
+
+    def finish_task(self, tid: str, note: str) -> Optional[str]:
+        """Ажлыг дуусгаж, тайланд бичнэ. Ажлын текстийг буцаана."""
+        row = self._find_row(TAB_TASK, 0, tid)
+        if row is None:
+            return None
+        r = self._get_rows(TAB_TASK)[row - 1]
+        text = _safe(r, 1)
+        self._update_row(TAB_TASK, row, [tid, text, "Хийсэн", _safe(r, 3), _now(), note])
+        self.add_log(f"Дууссан: {text}" + (f" — {note}" if note else ""))
+        return text
 
     # ── Тооцоо / Хаалт ─────────────────────────────────────────────────────────
 

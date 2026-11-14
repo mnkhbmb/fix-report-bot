@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f6feb">
+<title>The Lof — Тайлан</title>
+<style>
+  :root {
+    --bg: #f2f4f7; --card: #fff; --text: #1b1f24; --muted: #6b7280; --line: #e3e6ea;
+    --accent: #1f6feb; --accent-soft: #e7efff; --danger: #d64545; --chip: #eef1f4; --ok: #1a9e5c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --card: #181b21; --text: #e8eaed; --muted: #9aa1ab; --line: #2a2f37;
+            --accent: #4c8dff; --accent-soft: #1b2a45; --danger: #ff6b6b; --chip: #232830; --ok: #3ccf8e; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  input, textarea, button { font: inherit; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 18px 16px 6px; max-width: 560px; margin: 0 auto; }
+  header small { color: var(--muted); font-size: 13px; letter-spacing: .04em; text-transform: uppercase; }
+  header h1 { margin: 2px 0 0; font-size: 22px; }
+  main { padding: 8px 16px 110px; max-width: 560px; margin: 0 auto; }
+  [hidden] { display: none !important; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .card h2 { margin: 0 0 10px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .step { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff;
+          font-size: 12px; display: inline-grid; place-items: center; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input, textarea { width: 100%; padding: 12px; font-size: 16px; color: var(--text);
+                    background: var(--bg); border: 1px solid var(--line); border-radius: 10px; outline: none; }
+  input:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; }
+  .muted { color: var(--muted); font-size: 14px; }
+
+  .btn { border: 0; background: var(--accent); color: #fff; font-weight: 600; padding: 12px 16px; border-radius: 10px; }
+  .btn.soft { background: var(--accent-soft); color: var(--accent); }
+  .btn:disabled { opacity: .6; }
+  .line { display: flex; gap: 8px; margin-top: 8px; }
+  .line > input { flex: 1; }
+  .ghost { width: 100%; border: 1px dashed var(--accent); background: none; color: var(--accent);
+           padding: 12px; border-radius: 10px; font-size: 15px; }
+
+  /* Тайлан */
+  .day { margin-top: 14px; }
+  .day h3 { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
+  .entry { padding: 8px 10px; background: var(--bg); border-radius: 8px; margin-bottom: 6px; white-space: pre-wrap; }
+  .entry time { color: var(--muted); font-size: 12px; margin-right: 6px; }
+
+  /* Ажлууд */
+  .task { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .task:last-child { border-bottom: 0; }
+  .check { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--accent);
+           background: none; color: var(--ok); font-size: 16px; padding: 0; }
+  .task.done .check { border-color: var(--ok); background: var(--ok); color: #fff; }
+  .task.done .t { color: var(--muted); text-decoration: line-through; }
+  .task .note { font-size: 13px; color: var(--muted); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; padding: 6px 0; }
+
+  /* Акт */
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0 2px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; border: 0; background: var(--chip); color: var(--text); padding: 7px 12px; border-radius: 999px; font-size: 14px; }
+  .chip.on { background: var(--accent); color: #fff; }
+  .route { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+  .swap { border: 0; background: var(--accent-soft); color: var(--accent); width: 44px; height: 44px; border-radius: 10px; font-size: 20px; margin-bottom: 1px; }
+  .item { border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-bottom: 8px; }
+  .item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; color: var(--muted); font-size: 13px; }
+  .del { border: 0; background: none; color: var(--danger); font-size: 22px; line-height: 1; padding: 0 4px; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px; }
+  .qty { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .qty button { border: 0; background: var(--chip); color: var(--text); width: 38px; height: 44px; font-size: 20px; }
+  .qty input { width: 44px; border: 0; border-radius: 0; text-align: center; padding: 0; background: var(--card); }
+  .photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .ph { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--chip); }
+  .ph img { width: 100%; height: 100%; object-fit: cover; }
+  .ph button { position: absolute; top: 4px; right: 4px; border: 0; width: 26px; height: 26px; border-radius: 50%;
+               background: rgba(0,0,0,.6); color: #fff; font-size: 16px; line-height: 1; }
+  .ph.add { display: grid; place-items: center; border: 1px dashed var(--accent); background: none; color: var(--accent); font-size: 13px; text-align: center; cursor: pointer; }
+  .ph.add span { font-size: 26px; display: block; }
+  .act { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .act:last-child { border-bottom: 0; }
+  .act b { color: var(--accent); }
+  .done-box { background: var(--accent-soft); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+
+  /* Доод таб */
+  nav { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line);
+        padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); display: flex; justify-content: center; }
+  nav .in { max-width: 560px; width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); }
+  nav button { border: 0; background: none; color: var(--muted); padding: 6px 0; font-size: 12px; }
+  nav button span { display: block; font-size: 22px; }
+  nav button.on { color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <small>The Lof</small>
+  <h1 id="title">📝 Тайлан</h1>
+</header>
+
+<main>
+  <!-- ═══ ТАЙЛАН ═══ -->
+  <section id="tab-log">
+    <div class="card">
+      <h2>Өнөөдөр юу хийсэн бэ?</h2>
+      <textarea id="logText" rows="3" placeholder="жш: Lof 4 орж тог баригч солисон"></textarea>
+      <button class="btn" style="width:100%;margin-top:8px" onclick="addLog(this)">Нэмэх</button>
+    </div>
+    <div class="card">
+      <div class="line" style="margin:0">
+        <input type="month" id="month" onchange="loadLog()">
+        <button class="btn soft" onclick="reportPdf(this)">PDF</button>
+      </div>
+      <div id="logList"><p class="muted">Ачаалж байна...</p></div>
+    </div>
+  </section>
+
+  <!-- ═══ АЖЛУУД ═══ -->
+  <section id="tab-tasks" hidden>
+    <div class="card">
+      <h2>Хийх ажил нэмэх</h2>
+      <div class="line" style="margin:0">
+        <input id="taskText" placeholder="жш: Дархан руу 12 PC бэлдэх" onkeydown="if(event.key==='Enter')addTask()">
+        <button class="btn" onclick="addTask()">+</button>
+      </div>
+    </div>
+    <div class="card">
+      <div id="taskList"><p class="muted">Ачаалж байна...</p></div>
+      <details id="doneWrap"><summary>Дууссан ажлууд</summary><div id="doneList"></div></details>
+    </div>
+  </section>
+
+  <!-- ═══ АКТ ═══ -->
+  <section id="tab-act" hidden>
+    <div id="actDone" class="done-box" hidden></div>
+    <form id="actForm">
+      <datalist id="branches">{{BRANCHES}}</datalist>
+      <div class="card">
+        <h2><span class="step">1</span>Чиглэл</h2>
+        <div class="route">
+          <div><label>Хаанаас</label><input name="src" id="src" list="branches" required autocomplete="off"></div>
+          <button type="button" class="swap" onclick="swapRoute()" aria-label="Солих">⇅</button>
+        </div>
+        <div class="chips" data-for="src"></div>
+        <label>Хаашаа</label>
+        <input name="dst" id="dst" list="branches" required autocomplete="off">
+        <div class="chips" data-for="dst"></div>
+      </div>
+      <div class="card">
+        <h2><span class="step">2</span>Хүмүүс</h2>
+        <label>Өгсөн хүн</label><input name="giver">
+        <label>Хүлээн авсан хүн</label><input name="receiver">
+      </div>
+      <div class="card">
+        <h2><span class="step">3</span>Зүйлс</h2>
+        <div id="items"></div>
+        <button type="button" class="ghost" onclick="addItem(true)">+ Зүйл нэмэх</button>
+      </div>
+      <div class="card">
+        <h2><span class="step">4</span>Зураг</h2>
+        <div class="photos" id="photos">
+          <label class="ph add" for="pick"><div><span>＋</span>Зураг</div></label>
+        </div>
+        <input type="file" id="pick" accept="image/*" multiple hidden>
+      </div>
+      <div class="card">
+        <h2><span class="step">5</span>Тэмдэглэл</h2>
+        <textarea name="notes" rows="3" placeholder="Нэмэлт мэдээлэл (заавал биш)"></textarea>
+        <button class="btn" id="actSend" style="width:100%;margin-top:12px">Акт гаргах · <span id="summary"></span></button>
+      </div>
+    </form>
+    <div class="card">
+      <h2>🔎 Өмнөх актууд</h2>
+      <input id="actQ" placeholder="Хайх: Дархан, серийн дугаар..." oninput="searchActs()">
+      <div id="actList"></div>
+    </div>
+  </section>
+</main>
+
+<nav><div class="in">
+  <button data-tab="log" class="on"><span>📝</span>Тайлан</button>
+  <button data-tab="tasks"><span>✅</span>Ажлууд</button>
+  <button data-tab="act"><span>📄</span>Акт</button>
+</div></nav>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ── API (PIN-ийг нэг удаа асууж хадгална) ──
+async function api(path, opts = {}) {
+  let pin = ''; try { pin = localStorage.pin || ''; } catch {}
+  const r = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), 'X-PIN': pin } });
+  if (r.status === 401) {
+    const p = prompt('PIN код');
+    if (p === null) throw new Error('PIN шаардлагатай');
+    try { localStorage.pin = p; } catch {}
+    return api(path, opts);
+  }
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || ('Алдаа ' + r.status));
+  return r;
+}
+const postJSON = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+}
+
+// ── Табууд ──
+const titles = { log: '📝 Тайлан', tasks: '✅ Ажлууд', act: '📄 Акт' };
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => show(b.dataset.tab));
+function show(tab) {
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  ['log', 'tasks', 'act'].forEach(t => $('#tab-' + t).hidden = t !== tab);
+  $('#title').textContent = titles[tab];
+  ({ log: loadLog, tasks: loadTasks, act: searchActs })[tab]();
+  scrollTo(0, 0);
+}
+
+// ── Тайлан ──
+$('#month').value = new Date().toISOString().slice(0, 7);
+async function loadLog() {
+  try {
+    const rows = await (await api('/api/log?month=' + $('#month').value)).json();
+    const days = {};
+    rows.forEach(r => (days[r.date] ||= []).push(r));
+    const keys = Object.keys(days).sort().reverse();
+    $('#logList').innerHTML = keys.length ? keys.map(d =>
+      `<div class="day"><h3>${esc(d)}</h3>` +
+      days[d].map(e => `<div class="entry"><time>${esc(e.time)}</time>${esc(e.text)}</div>`).join('') + '</div>'
+    ).join('') : '<p class="muted">Энэ сард бичлэг алга.</p>';
+  } catch (e) { $('#logList').innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+}
+async function addLog(btn) {
+  const t = $('#logText').value.trim();
+  if (!t) return;
+  btn.disabled = true;
+  try { await postJSON('/api/log', { text: t }); $('#logText').value = ''; await loadLog(); }
+  catch (e) { alert(e.message); }
+  btn.disabled = false;
+}
+async function reportPdf(btn) {
+  btn.disabled = true;
+  try {
+    const m = $('#month').value;
+    download(await (await api('/api/report.pdf?month=' + m)).blob(), `Тайлан-${m}.pdf`);
+  } catch (e) { alert(e.message); }
+  btn.disabled = false;
+}
+
+// ── Ажлууд ──
+async function loadTasks() {
+  try {
+    const all = await (await api('/api/tasks')).json();
+    const open = all.filter(t => t.status !== 'Хийсэн'), done = all.filter(t => t.status === 'Хийсэн').reverse();
+    const row = (t, isDone) => `<div class="task${isDone ? ' done' : ''}">
+        <button class="check" ${isDone ? 'disabled' : `onclick="finish('${esc(t.id)}')"`} aria-label="Дууссан">${isDone ? '✓' : ''}</button>
+        <div><div class="t">${esc(t.text)}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
+        ${isDone ? `<div class="note">${esc(t.done)}</div>` : ''}</div></div>`;
+    $('#taskList').innerHTML = open.length ? open.map(t => row(t, false)).join('') : '<p class="muted">Хийх ажил алга 🎉</p>';
+    $('#doneList').innerHTML = done.map(t => row(t, true)).join('');
+    $('#doneWrap').hidden = !done.length;
+  } catch (e) { $('#taskList').innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+}
+async function addTask() {
+  const t = $('#taskText').value.trim();
+  if (!t) return;
+  try { await postJSON('/api/tasks', { text: t }); $('#taskText').value = ''; loadTasks(); }
+  catch (e) { alert(e.message); }
+}
+async function finish(id) {
+  const note = prompt('Юу хийж дуусгасан бэ? (заавал биш)');
+  if (note === null) return;
+  try { await postJSON('/api/tasks/done', { id, note }); loadTasks(); }
+  catch (e) { alert(e.message); }
+}
+
+// ── Акт ──
+const files = new DataTransfer();
+const branches = [...document.querySelectorAll('#branches option')].map(o => o.value);
+document.querySelectorAll('.chips').forEach(box => {
+  const input = $('#' + box.dataset.for);
+  branches.forEach(b => {
+    const c = document.createElement('button');
+    c.type = 'button'; c.className = 'chip'; c.textContent = b;
+    c.onclick = () => { input.value = b; syncChips(); };
+    box.appendChild(c);
+  });
+  input.addEventListener('input', syncChips);
+});
+function syncChips() {
+  document.querySelectorAll('.chips').forEach(box => {
+    const v = $('#' + box.dataset.for).value;
+    box.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.textContent === v));
+  });
+}
+function swapRoute() { const s = $('#src'), d = $('#dst'); [s.value, d.value] = [d.value, s.value]; syncChips(); }
+
+function addItem(focus) {
+  const d = document.createElement('div');
+  d.className = 'item';
+  d.innerHTML =
+    '<div class="item-top"><span class="n"></span><button type="button" class="del" aria-label="Устгах">×</button></div>' +
+    '<div class="row"><input name="item" placeholder="Зүйл (жш: PC, монитор)">' +
+    '<div class="qty"><button type="button" data-d="-1">−</button>' +
+    '<input name="qty" type="number" min="1" value="1" inputmode="numeric">' +
+    '<button type="button" data-d="1">+</button></div></div>' +
+    '<input name="serial" placeholder="Серийн дугаар (олон бол таслалаар)">';
+  d.querySelector('.del').onclick = () => { d.remove(); if (!$('#items').children.length) addItem(); renumber(); };
+  d.querySelectorAll('.qty button').forEach(b => b.onclick = () => {
+    const q = d.querySelector('[name=qty]');
+    q.value = Math.max(1, (+q.value || 1) + +b.dataset.d);
+  });
+  d.querySelector('[name=item]').addEventListener('input', summary);
+  $('#items').appendChild(d);
+  renumber();
+  if (focus) d.querySelector('[name=item]').focus();
+}
+function renumber() {
+  [...$('#items').children].forEach((el, i) => el.querySelector('.n').textContent = 'Зүйл ' + (i + 1));
+  summary();
+}
+$('#pick').addEventListener('change', e => { [...e.target.files].forEach(f => files.items.add(f)); e.target.value = ''; drawPhotos(); });
+function drawPhotos() {
+  const grid = $('#photos');
+  grid.querySelectorAll('.ph:not(.add)').forEach(el => el.remove());
+  [...files.files].forEach((f, i) => {
+    const el = document.createElement('div'); el.className = 'ph';
+    const img = document.createElement('img'); img.src = URL.createObjectURL(f);
+    const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.setAttribute('aria-label', 'Зураг устгах');
+    x.onclick = () => { files.items.remove(i); drawPhotos(); };
+    el.append(img, x);
+    grid.insertBefore(el, grid.querySelector('.add'));
+  });
+  summary();
+}
+function summary() {
+  const n = [...document.querySelectorAll('[name=item]')].filter(i => i.value.trim()).length;
+  $('#summary').textContent = `${n} зүйл · ${files.files.length} зураг`;
+}
+
+$('#actForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const b = $('#actSend'), label = b.innerHTML;
+  b.disabled = true; b.textContent = 'Акт гаргаж байна...';
+  try {
+    const fd = new FormData(e.target);
+    [...files.files].forEach(f => fd.append('photos', f));
+    const r = await api('/api/act', { method: 'POST', body: fd });
+    const id = r.headers.get('X-Act-Id'), blob = await r.blob();
+    download(blob, id + '.pdf');
+    $('#actDone').hidden = false;
+    $('#actDone').innerHTML = `✅ <b>${esc(id)}</b> гарлаа. PDF татагдсан — хүнд дамжуулж болно.`;
+    e.target.reset(); files.items.clear(); drawPhotos(); $('#items').innerHTML = ''; addItem(); syncChips();
+    scrollTo(0, 0); searchActs();
+  } catch (err) { alert(err.message); }
+  b.disabled = false; b.innerHTML = label; summary();
+});
+
+let qTimer;
+function searchActs() {
+  clearTimeout(qTimer);
+  qTimer = setTimeout(async () => {
+    try {
+      const rows = await (await api('/api/acts?q=' + encodeURIComponent($('#actQ').value))).json();
+      const acts = {};
+      rows.forEach(r => (acts[r['Акт ID']] ||= []).push(r));
+      $('#actList').innerHTML = Object.entries(acts).map(([id, its]) => {
+        const a = its[0];
+        return `<div class="act"><b>${esc(id)}</b> · ${esc(a['Огноо'])}<br>${esc(a['Хаанаас'])} → ${esc(a['Хаашаа'])}
+          <div class="muted">${its.map(i => esc(i['Тоо'] + 'ш ' + i['Зүйл'] + (i['Серийн дугаар'] ? ' (' + i['Серийн дугаар'] + ')' : ''))).join(', ')}</div>
+          ${a['Discord'] ? `<a href="${esc(a['Discord'])}" target="_blank">Discord-оос PDF</a>` : ''}</div>`;
+      }).join('') || '<p class="muted">Олдсонгүй.</p>';
+    } catch (e) { $('#actList').innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+  }, 250);
+}
+
+addItem();
+loadLog();
+</script>
+</body>
+</html>
