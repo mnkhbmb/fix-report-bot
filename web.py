@@ -29,6 +29,38 @@ PIN = os.environ.get("ACT_PIN", "")
 # Ажлын зураг: Railway Volume холбосон бол тэнд (redeploy-д устахгүй), эс бөгөөс repo хавтсанд (redeploy-д устна!)
 PHOTO_DIR = os.path.join(os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") or HERE, "photos")
 PHOTO_RE = re.compile(r"^[0-9a-f]{32}\.jpg$")
+# R2_BUCKET тавьсан бол зураг Cloudflare R2-д (private bucket, манай сервер дамжуулна), үгүй бол локал хавтаст
+R2_BUCKET = os.environ.get("R2_BUCKET", "")
+_r2 = None
+
+
+def r2():
+    global _r2
+    if _r2 is None:
+        import boto3
+        _r2 = boto3.client("s3", region_name="auto",
+                           endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+                           aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+                           aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"])
+    return _r2
+
+
+def put_photo(name, data):
+    if R2_BUCKET:
+        return r2().put_object(Bucket=R2_BUCKET, Key=name, Body=data, ContentType="image/jpeg")
+    os.makedirs(PHOTO_DIR, exist_ok=True)
+    with open(os.path.join(PHOTO_DIR, name), "wb") as fh:
+        fh.write(data)
+
+
+def get_photo(name):
+    if R2_BUCKET:
+        try:
+            return r2().get_object(Bucket=R2_BUCKET, Key=name)["Body"].read()
+        except r2().exceptions.NoSuchKey:
+            return None
+    path = os.path.join(PHOTO_DIR, name)
+    return open(path, "rb").read() if os.path.exists(path) else None
 ACT_CHANNEL_ID = int(os.environ.get("ACT_CHANNEL_ID", "0") or 0)
 BRANCHES = ["түмэн", "2-спортын-төв-ордон", "3-энхтайваны-төв-ордон", "4-муис",
             "4-ps", "8-19", "9-суис", "10-цирк", "Дархан"]
@@ -237,12 +269,9 @@ async def task_photo(request):
         imgs = await asyncio.to_thread(lambda: [shrink(r) for r in raw])
     except Exception:
         return web.json_response({"error": "Зураг уншиж чадсангүй"}, status=400)
-    os.makedirs(PHOTO_DIR, exist_ok=True)
-    names = []
-    for img in imgs:
-        names.append(f"{uuid.uuid4().hex}.jpg")
-        with open(os.path.join(PHOTO_DIR, names[-1]), "wb") as fh:
-            fh.write(img)
+    names = [f"{uuid.uuid4().hex}.jpg" for _ in imgs]
+    for n, img in zip(names, imgs):
+        await asyncio.to_thread(put_photo, n, img)
     try:
         await db(request.app["sheets"].add_task_photos, data.get("id", ""), names)
     except ValueError as e:
@@ -252,10 +281,11 @@ async def task_photo(request):
 
 async def photo_get(request):
     name = request.match_info["name"]
-    path = os.path.join(PHOTO_DIR, name)
-    if not PHOTO_RE.match(name) or not os.path.exists(path):
+    data = PHOTO_RE.match(name) and await asyncio.to_thread(get_photo, name)
+    if not data:
         raise web.HTTPNotFound()
-    return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    return web.Response(body=data, content_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 async def tasks_move(request):
