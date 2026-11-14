@@ -97,6 +97,16 @@ async def main():
     assert assistant.run_tool(s, "finish_task", {"id": "T-9999"}, acts) == "Ажил олдсонгүй"
     assistant.run_tool(s, "add_log", {"text": "Viot уулзалт", "date": "2026-11-12"}, acts)
     assert json.loads(assistant.run_tool(s, "get_log", {"start": "2026-11-12", "end": "2026-11-12"}, acts))[0]["tag"] == "Viot"
+    # бичлэгийг өөр tag руу шилжүүлэх
+    e = s.get_log("2026-11-12", "2026-11-12")[0]
+    assistant.run_tool(s, "set_log_tag", {"row": e["row"], "text": e["text"], "tag": "Crystal"}, acts)
+    assert s.get_log("2026-11-12", "2026-11-12", "crystal")[0]["text"] == "Viot уулзалт"
+    s.set_log_tag(e["row"], e["text"], "-"); assert s.get_log("2026-11-12", "2026-11-12")[0]["tag"] == ""
+    s.set_log_tag(e["row"], e["text"], ""); assert s.get_log("2026-11-12", "2026-11-12")[0]["tag"] == "Viot"
+    try:
+        s.set_log_tag(e["row"], "өөр текст", "Lof"); assert False   # мөр шилжсэн бол бичихгүй
+    except ValueError:
+        pass
     assistant.run_tool(s, "prepare_act", {"src": "10-цирк", "dst": "Дархан", "items": [{"item": "PC", "qty": 12}]}, acts)
     assert acts[0]["type"] == "prepare_act" and acts[0]["items"][0]["qty"] == 12
     try:

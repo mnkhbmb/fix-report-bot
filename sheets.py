@@ -588,12 +588,22 @@ class SheetsClient:
     def get_log(self, start: str, end: str, tag: str = "") -> list[dict]:
         """start..end (YYYY-MM-DD, хоёулаа орно) хоорондох бичлэгүүд. tag өгвөл шүүнэ."""
         out = []
-        for r in self._get_rows(TAB_LOG)[1:]:
+        for n, r in enumerate(self._get_rows(TAB_LOG)[1:], start=2):   # n = sheet-ийн мөрийн дугаар
             d, text = _safe(r, 0), _safe(r, 2)
             t = _safe(r, 3) or auto_tag(text)
+            t = "" if t == "-" else t   # "-" = гараар tag-гүй болгосон
             if start <= d <= end and (not tag or t.lower() == tag.lower()):
-                out.append({"date": d, "time": _safe(r, 1), "text": text, "tag": t})
+                out.append({"row": n, "date": d, "time": _safe(r, 1), "text": text, "tag": t})
         return out
+
+    def set_log_tag(self, row: int, text: str, tag: str):
+        """Бичлэгийн tag-ийг солино. text-ээр мөрийг давхар шалгана (мөр шилжсэн бол буруу мөрөнд бичихгүй).
+        tag='' → автомат, '-' → tag-гүй."""
+        # ponytail: мөрийн дугаараар хаяглана — Тайлан табаас мөр устгавал хуучин дугаар буруудна, text шалгалт хамгаална
+        rows = self._get_rows(TAB_LOG)
+        if not (2 <= row <= len(rows)) or _safe(rows[row - 1], 2) != text:
+            raise ValueError("Бичлэг олдсонгүй — хуудсаа шинэчилнэ үү")
+        self._update_cell(TAB_LOG, row, "D", tag)
 
     def add_task(self, text: str, parent: str = "") -> str:
         """parent өгвөл sub ажил — parent нь байгаа main ажил байх ёстой."""

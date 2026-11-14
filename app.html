@@ -353,9 +353,20 @@ async function loadLog() {
     const keys = Object.keys(days).sort().reverse();
     $('#logList').innerHTML = keys.length ? keys.map(d =>
       `<div class="day"><h3>${esc(days[d][0].label)}</h3>` +
-      days[d].map(e => `<div class="entry"><time>${esc(e.time)}</time>${e.tag ? `<span class="tag">${esc(e.tag)}</span>` : ''}${esc(e.text)}</div>`).join('') + '</div>'
+      days[d].map(e => { LOG[e.row] = e; return `<div class="entry" style="display:flex;gap:8px;align-items:center;white-space:normal"><div style="flex:1;white-space:pre-wrap"><time>${esc(e.time)}</time>${e.tag ? `<span class="tag">${esc(e.tag)}</span>` : ''}${esc(e.text)}</div>
+        <select class="mv" aria-label="Tag солих" onchange="retag(${e.row}, this.value)">
+          <option value="_" selected hidden>#</option>${TAG_OPTS}
+          <option value="+">＋ Шинэ tag...</option><option value="">↺ Автомат</option><option value="-">✕ Tag-гүй</option>
+        </select></div>`; }).join('') + '</div>'
     ).join('') : '<p class="muted">Бичлэг алга.</p>';
   } catch (e) { $('#logList').innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+}
+const LOG = {}, TAG_OPTS = $('#tagFilter').innerHTML.replace(/<option value="">[^<]*<\/option>/, '');
+async function retag(row, tag) {
+  if (tag === '+') { tag = (prompt('Шинэ tag:') || '').trim(); if (!tag) return loadLog(); }
+  try { await postJSON('/api/log/tag', { row, text: LOG[row].text, tag }); }
+  catch (e) { alert(e.message); }
+  loadLog();
 }
 async function addLog(btn) {
   const t = $('#logText').value.trim();

@@ -19,7 +19,7 @@ SYSTEM = f"""Чи The Lof интернэт кафены IT ажилтны ажл
 өдрийн тайланд бичлэг нэмэх, тайлан харах/PDF гаргах, хүлээлцэх акт бэлдэх, өмнөх актаас хайх.
 
 Дүрэм:
-- Sheet-д бичих үйлдлийн өмнө (add_task, finish_task, move_task, add_log) юу бичихээ товч жагсаагаад \
+- Sheet-д бичих үйлдлийн өмнө (add_task, finish_task, move_task, add_log, set_log_tag) юу бичихээ товч жагсаагаад \
 "Зөв үү?" гэж асуу. Хэрэглэгч зөвшөөрсний ДАРАА л tool дууд. Унших tool-уудыг шууд дуудаж болно.
 - Дутуу мэдээллийг эргэж асуу: акт бол хаанаас, хаашаа, юу, хэдэн ширхэг, серийн дугаар (байвал), \
 хэн өгч хэн авсан; ажил дуусгах бол аль ажил, юу хийж дуусгасан.
@@ -44,6 +44,10 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {"text": _str, "date": _str, "tag": _str}, "required": ["text"]}},
     {"name": "get_log", "description": "Огнооны хүрээн дэх тайлангийн бичлэгүүд (YYYY-MM-DD, хоёулаа орно).",
      "input_schema": {"type": "object", "properties": {"start": _str, "end": _str, "tag": _str}, "required": ["start", "end"]}},
+    {"name": "set_log_tag", "description": "Тайлангийн бичлэгийн tag-ийг солино. row, text-ийг get_log-оос ав. "
+     "tag='' → автомат, '-' → tag-гүй.",
+     "input_schema": {"type": "object", "properties": {"row": {"type": "integer"}, "text": _str, "tag": _str},
+                      "required": ["row", "text", "tag"]}},
     {"name": "report_pdf", "description": "Хэрэглэгчийн утсанд тайлангийн PDF татуулна.",
      "input_schema": {"type": "object", "properties": {"start": _str, "end": _str, "tag": _str}, "required": ["start", "end"]}},
     {"name": "search_acts", "description": "Өмнөх актуудаас хайна (салбар, зүйл, серийн дугаар...).",
@@ -72,6 +76,9 @@ def run_tool(sheets, name: str, a: dict, actions: list) -> str:
         datetime.strptime(a["date"], "%Y-%m-%d") if a.get("date") else None   # буруу огноо → алдаа
         sheets.add_log(a["text"], a.get("date", ""), a.get("tag", ""))
         return "Бичигдлээ"
+    if name == "set_log_tag":
+        sheets.set_log_tag(int(a["row"]), a["text"], a["tag"])
+        return "Tag солигдлоо"
     if name == "get_log":
         return json.dumps(sheets.get_log(a["start"], a["end"], a.get("tag", "")), ensure_ascii=False)
     if name == "search_acts":
