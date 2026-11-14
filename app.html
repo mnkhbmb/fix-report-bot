@@ -111,12 +111,12 @@
 <body>
 <header>
   <small>The Lof</small>
-  <h1 id="title">📝 Тайлан</h1>
+  <h1 id="title">✅ Ажлууд</h1>
 </header>
 
 <main>
   <!-- ═══ ТАЙЛАН ═══ -->
-  <section id="tab-log">
+  <section id="tab-log" hidden>
     <div class="card">
       <h2>Өнөөдөр юу хийсэн бэ?</h2>
       <textarea id="logText" rows="3" placeholder="жш: Lof 4 орж тог баригч солисон&#10;(мөр бүр тусдаа бичлэг)"></textarea>
@@ -144,7 +144,7 @@
   </section>
 
   <!-- ═══ АЖЛУУД ═══ -->
-  <section id="tab-tasks" hidden>
+  <section id="tab-tasks">
     <div class="card">
       <h2>Хийх ажил нэмэх</h2>
       <div class="seg" id="kind">
@@ -224,8 +224,8 @@
 </main>
 
 <nav><div class="in">
-  <button data-tab="log" class="on"><span>📝</span>Тайлан</button>
-  <button data-tab="tasks"><span>✅</span>Ажлууд</button>
+  <button data-tab="tasks" class="on"><span>✅</span>Ажлууд</button>
+  <button data-tab="log"><span>📝</span>Тайлан</button>
   <button data-tab="act"><span>📄</span>Акт</button>
   <button data-tab="ai"><span>🎤</span>Туслах</button>
 </div></nav>
@@ -541,7 +541,7 @@ function searchActs() {
 }
 
 addItem();
-loadLog();
+show('tasks');   // нүүр таб — Ажлууд
 </script>
 </body>
 </html>
