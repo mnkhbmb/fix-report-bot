@@ -33,6 +33,8 @@
   .tag { display: inline-block; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent);
          padding: 1px 7px; border-radius: 999px; margin-right: 6px; }
   .task.sub { margin-left: 30px; }
+  .due { font-size: 12px; color: var(--muted); margin-left: 6px; white-space: nowrap; }
+  .due.late { color: var(--danger); font-weight: 600; }
   select.mv { flex: none; width: 40px; padding: 4px 0; text-align: center; font-size: 16px;
               background: var(--chip); border-color: transparent; color: var(--accent); }
   select { appearance: none; }
@@ -47,7 +49,7 @@
   .btn.soft { background: var(--accent-soft); color: var(--accent); }
   .btn:disabled { opacity: .6; }
   .line { display: flex; gap: 8px; margin-top: 8px; }
-  .line > input { flex: 1; }
+  .line > input { flex: 1; min-width: 0; }
   .ghost { width: 100%; border: 1px dashed var(--accent); background: none; color: var(--accent);
            padding: 12px; border-radius: 10px; font-size: 15px; }
 
@@ -173,11 +175,17 @@
       <select id="parent" hidden></select>
       <div class="line">
         <input id="taskText" placeholder="жш: Дархан руу 12 PC бэлдэх" onkeydown="if(event.key==='Enter')addTask()">
-        <input id="taskTag" list="tags" placeholder="Tag" autocomplete="off" style="width:80px;flex:none">
         <button class="btn" onclick="addTask()">+</button>
+      </div>
+      <div class="line">
+        <input id="taskTag" list="tags" placeholder="Tag" autocomplete="off">
+        <input id="taskDue" type="date" style="flex:1.6" aria-label="Дуусах хугацаа" title="Дуусах хугацаа">
+        <button type="button" class="chip" id="taskUrg" onclick="this.classList.toggle('on')" title="Яаралтай">🔥</button>
       </div>
     </div>
     <div class="card">
+      <select id="taskFilter" onchange="loadTasks()" style="margin-bottom:6px"><option value="">Бүх ажил</option></select>
+      <input id="duePick" type="date" tabindex="-1" aria-hidden="true" style="position:fixed;opacity:0;width:1px;height:1px;pointer-events:none">
       <div id="taskList"><p class="muted">Ачаалж байна...</p></div>
       <details id="doneWrap"><summary>Дууссан ажлууд</summary><div id="doneList"></div></details>
     </div>
@@ -469,7 +477,16 @@ async function loadTasks() {
     const all = await (await api('/api/tasks')).json();
     const byId = Object.fromEntries(all.map(t => [t.id, t]));
     const isDone = t => t.status === 'Хийсэн' || PEND.has(t.id);   // хадгалагдаж байгааг дахин харуулахгүй
-    const open = all.filter(t => !isDone(t)), done = all.filter(isDone).reverse();
+    // шүүлт: tag эсвэл 🔥 яаралтай. Сонголтыг TAGS + ажлууд дээрх tag-уудаас бүрдүүлнэ
+    const f = $('#taskFilter').value, tagSet = [...new Set([...TAGS, ...all.map(t => t.tag).filter(Boolean)])];
+    $('#taskFilter').innerHTML = '<option value="">Бүх ажил</option><option value="!urg">🔥 Яаралтай</option>' +
+      tagSet.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    $('#taskFilter').value = f;
+    const hit = t => !f || (f === '!urg' ? !!t.urgent : t.tag === f);
+    // эрэмбэ: 🔥 эхэнд, дараа нь дуусах хугацаа ойртсон нь
+    const rank = t => (t.urgent ? '0' : '1') + (t.due || '9999');
+    const open = all.filter(t => !isDone(t)).sort((a, b) => rank(a) < rank(b) ? -1 : rank(a) > rank(b) ? 1 : 0);
+    const done = all.filter(t => isDone(t) && hit(t)).reverse();
     // sub-ийн main нь харагдахгүй (дууссан) бол "Main › " гэж угтвар тавина
     const name = (t, nested) => (!nested && byId[t.parent] ? `<span class="note">${esc(byId[t.parent].text)} › </span>` : '') + esc(t.text);
     const mains = open.filter(t => !t.parent);
@@ -480,7 +497,9 @@ async function loadTasks() {
         <option value="📷">📷 Зураг нэмэх</option>
         <optgroup label="Tag">${TAGS.map(x => `<option value="tag:${esc(x)}">${esc(x)}</option>`).join('')}
           <option value="tag:+">＋ Шинэ tag...</option><option value="tag:">↺ Автомат</option><option value="tag:-">✕ Tag-гүй</option></optgroup>
-        ${d ? '' : (t.parent ? '<option value="">↑ Main болгох</option>' : '') +
+        ${d ? '' : `<option value="urg:${t.urgent ? '' : '1'}">${t.urgent ? '🔥 Яаралтай биш болгох' : '🔥 Яаралтай'}</option>
+          <option value="due">📅 Дуусах хугацаа...</option>${t.due ? '<option value="due:">✕ Хугацаа арилгах</option>' : ''}` +
+          (t.parent ? '<option value="">↑ Main болгох</option>' : '') +
           mains.filter(m => m.id !== t.id && m.id !== t.parent).map(m => `<option value="${esc(m.id)}">↳ ${esc(m.text)}</option>`).join('')}
       </select>`;
     const thumbs = t => t.photos ? `<div class="thumbs" onclick="event.stopPropagation()">${t.photos.split(',').map(p =>
@@ -488,15 +507,15 @@ async function loadTasks() {
     // cnt = {open, total} — sub-тай main бол дарахад sub-ууд нээгдэнэ
     const row = (t, d, nested, cnt) => `<div class="task${d ? ' done' : ''}${nested ? ' sub' : ''}">
         <button class="check" ${d ? 'disabled' : `onclick="finish('${esc(t.id)}', this)"`} aria-label="Дууссан">${d ? '✓' : ''}</button>
-        <div style="flex:1"${cnt ? ` class="fold" onclick="toggle('${esc(t.id)}', this)"` : ''}><div class="t">${t.tag ? `<span class="tag">${esc(t.tag)}</span>` : ''}${name(t, nested)}${cnt
+        <div style="flex:1"${cnt ? ` class="fold" onclick="toggle('${esc(t.id)}', this)"` : ''}><div class="t">${t.tag ? `<span class="tag">${esc(t.tag)}</span>` : ''}${t.urgent && !d ? '🔥 ' : ''}${name(t, nested)}${dueTag(t, d)}${cnt
           ? ` <span class="cnt">${EXP.has(t.id) ? '▾' : '▸'} ${cnt.total - cnt.open}/${cnt.total}</span>` : ''}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
         ${d ? `<div class="note">${esc(t.done)}</div>` : ''}${thumbs(t)}</div>${mover(t, d)}</div>`;
-    const tops = open.filter(t => !open.some(m => m.id === t.parent));
+    const tops = open.filter(t => !open.some(m => m.id === t.parent) && (hit(t) || open.some(s => s.parent === t.id && hit(s))));
     $('#taskList').innerHTML = tops.length ? tops.map(m => {
-      const subs = open.filter(s => s.parent === m.id), total = all.filter(s => s.parent === m.id).length;
+      const subs = open.filter(s => s.parent === m.id && hit(s)), total = all.filter(s => s.parent === m.id).length;
       return row(m, false, false, total ? { open: subs.length, total } : null) + (subs.length
         ? `<div class="subs" data-for="${esc(m.id)}"${EXP.has(m.id) ? '' : ' hidden'}>${subs.map(s => row(s, false, true)).join('')}</div>` : '');
-    }).join('') : '<p class="muted">Хийх ажил алга 🎉</p>';
+    }).join('') : `<p class="muted">${f ? 'Энэ шүүлтэд ажил алга' : 'Хийх ажил алга 🎉'}</p>`;
     $('#doneList').innerHTML = done.map(t => row(t, true, false)).join('');
     $('#doneWrap').hidden = !done.length;
     const keep = $('#parent').value;
@@ -510,7 +529,10 @@ async function addTask() {
   if (!t) return;
   const parent = kind() === 'sub' ? $('#parent').value : '';
   if (kind() === 'sub' && !parent) return alert('Sub ажлын Main ажлыг сонгоно уу');
-  try { await postJSON('/api/tasks', { text: t, parent, tag: $('#taskTag').value.trim() }); $('#taskText').value = ''; loadTasks(); }
+  try {
+    await postJSON('/api/tasks', { text: t, parent, tag: $('#taskTag').value.trim(), due: $('#taskDue').value, urgent: $('#taskUrg').classList.contains('on') });
+    $('#taskText').value = ''; $('#taskDue').value = ''; $('#taskUrg').classList.remove('on'); loadTasks();
+  }
   catch (e) { alert(e.message); }
 }
 const taskPick = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', multiple: true });
@@ -525,6 +547,14 @@ async function move(id, parent) {
     taskPick.click(); return loadTasks();
   }
   let body = { id, parent };
+  if (parent === 'due') {   // огноо сонгогч (утсан дээр календарь) — showPicker дэмжихгүй бол prompt
+    const dp = $('#duePick');
+    dp.value = ''; dp.onchange = () => dp.value && setTask(id, { due: dp.value });
+    try { dp.showPicker(); } catch { const v = prompt('Дуусах огноо (YYYY-MM-DD):', ymd(new Date())); if (v) setTask(id, { due: v.trim() }); }
+    return loadTasks();
+  }
+  if (parent.startsWith('urg:')) return setTask(id, { urgent: parent.slice(4) });
+  if (parent.startsWith('due:')) return setTask(id, { due: '' });
   if (parent.startsWith('tag:')) {   // ⋯ → Tag
     let tag = parent.slice(4);
     if (tag === '+') { tag = (prompt('Шинэ tag:') || '').trim(); if (!tag) return loadTasks(); }
@@ -533,6 +563,15 @@ async function move(id, parent) {
   try { await postJSON('/api/tasks/move', body); }
   catch (e) { alert(e.message); }
   loadTasks();
+}
+async function setTask(id, fields) {
+  try { await postJSON('/api/tasks/move', { id, ...fields }); } catch (e) { alert(e.message); }
+  loadTasks();
+}
+function dueTag(t, d) {
+  if (!t.due || d) return '';
+  const today = ymd(new Date());
+  return `<span class="due${t.due <= today ? ' late' : ''}">📅 ${t.due === today ? 'Өнөөдөр' : esc(t.due.slice(5))}</span>`;
 }
 const PEND = new Set();
 async function finish(id, btn) {

@@ -88,6 +88,16 @@ async def main():
         assert (await tt(vm, "Lof")).status == 200 and tg()[vs] == "Lof"
         assert (await tt(vs, "-")).status == 200 and tg()[vs] == ""
         assert (await tt("T-9999", "Lof")).status == 400
+        # яаралтай + дуусах хугацаа
+        uj = (await (await c.post("/api/tasks", json={"text": "Сервер унасан", "urgent": True, "due": "2026-11-16"}, headers=H)).json())["id"]
+        t = {x["id"]: x for x in s.get_tasks()}[uj]
+        assert (t["urgent"], t["due"]) == ("1", "2026-11-16")
+        assert (await c.post("/api/tasks", json={"text": "x", "due": "16/11"}, headers=H)).status == 400
+        st = lambda **kw: c.post("/api/tasks/move", json={"id": uj, **kw}, headers=H)
+        assert (await st(urgent="")).status == 200 and (await st(due="")).status == 200
+        assert (await st(due="bad")).status == 400
+        t = {x["id"]: x for x in s.get_tasks()}[uj]
+        assert (t["urgent"], t["due"]) == ("", "")
 
         img = io.BytesIO(); Image.new("RGB", (3000, 2000), "red").save(img, "JPEG")
         fd = FormData()

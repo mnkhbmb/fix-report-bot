@@ -229,11 +229,11 @@ async def tasks_get(request):
 
 async def tasks_post(request):
     d = await request.json()
-    text, parent, tag = ((d.get(k) or "").strip() for k in ("text", "parent", "tag"))
+    text, parent, tag, due = ((d.get(k) or "").strip() for k in ("text", "parent", "tag", "due"))
     if not text:
         return web.json_response({"error": "Хоосон байна"}, status=400)
     try:
-        tid = await db(request.app["sheets"].add_task, text, parent, tag)
+        tid = await db(request.app["sheets"].add_task, text, parent, tag, "1" if d.get("urgent") else "", due)
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"id": tid})
@@ -289,12 +289,15 @@ async def photo_get(request):
 
 
 async def tasks_move(request):
-    """{id, parent} → зөөх; {id, tag} → tag солих."""
+    """{id, parent} → зөөх; {id, tag|urgent|due} → тэр талбарыг солих."""
     d = await request.json()
     s = request.app["sheets"]
-    fn, val = (s.set_task_tag, d["tag"]) if "tag" in d else (s.move_task, d.get("parent"))
+    field = next((k for k in ("tag", "urgent", "due") if k in d), None)
     try:
-        await db(fn, d.get("id", ""), (val or "").strip())
+        if field:
+            await db(s.set_task, d.get("id", ""), field, str(d[field] or "").strip())
+        else:
+            await db(s.move_task, d.get("id", ""), (d.get("parent") or "").strip())
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"ok": True})
