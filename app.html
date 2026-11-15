@@ -479,7 +479,7 @@ function toggle(id, el) {
 async function loadTasks() {
   try {
     const all = await (await api('/api/tasks')).json();
-    const byId = Object.fromEntries(all.map(t => [t.id, t]));
+    const byId = BYID = Object.fromEntries(all.map(t => [t.id, t]));
     const isDone = t => t.status === 'Хийсэн' || PEND.has(t.id);   // хадгалагдаж байгааг дахин харуулахгүй
     // шүүлт: tag эсвэл 🔥 яаралтай. Сонголтыг TAGS + ажлууд дээрх tag-уудаас бүрдүүлнэ
     const f = $('#taskFilter').value, tagSet = [...new Set([...TAGS, ...all.map(t => t.tag).filter(Boolean)])];
@@ -581,7 +581,7 @@ function dueTag(t, d) {
   return `<span class="due${t.due <= today ? ' late' : ''}">📅 ${t.due === today ? 'Өнөөдөр' : esc(t.due.slice(5))}</span>`;
 }
 // 📝 Ажлын тэмдэглэл — нэг удаад нэг ажлынх нээгдэнэ, мөрийн доор
-let NOTE = '';
+let NOTE = '', NOTES = [], BYID = {};
 async function renderNotes() {
   document.querySelectorAll('.notes').forEach(n => n.remove());
   const row = NOTE && document.querySelector(`.task[data-id="${CSS.escape(NOTE)}"]`);
@@ -590,13 +590,25 @@ async function renderNotes() {
   row.after(box);
   const id = NOTE;
   try {
-    const list = await (await api('/api/tasks/notes?id=' + encodeURIComponent(id))).json();
-    box.innerHTML = (list.length ? list.map(n => `<div class="nt"><time>${esc(n.date.slice(5))} ${esc(n.time)}</time>${esc(n.text)}</div>`).join('')
+    const list = NOTES = await (await api('/api/tasks/notes?id=' + encodeURIComponent(id))).json();
+    const t = BYID[id], main = t && !t.parent && t.status !== 'Хийсэн';   // main ажлын тэмдэглэлийг sub ажил болгож болно
+    box.innerHTML = (list.length ? list.map((n, i) => `<div class="nt" style="display:flex;gap:6px"><div style="flex:1"><time>${esc(n.date.slice(5))} ${esc(n.time)}</time>${esc(n.text)}</div>${main
+        ? `<button class="cnt" style="border:0;align-self:start" onclick="toSubs('${esc(id)}', NOTES[${i}].text, this)">↳ Sub</button>` : ''}</div>`).join('')
       : '<p class="muted" style="margin:0">Тэмдэглэл алга.</p>') +
       `<textarea rows="3" placeholder="Өнөөдөр юу болсон бэ..."></textarea>
-       <div class="line"><button class="btn" style="flex:1" onclick="addNote('${esc(id)}', this)">Хадгалах</button>
+       <div class="line"><button class="btn" style="flex:1" onclick="addNote('${esc(id)}', this)">Хадгалах</button>${main
+       ? `<button class="btn soft" onclick="toSubs('${esc(id)}', this.closest('.notes').querySelector('textarea').value, this)" title="Мөр бүр sub ажил болно">↳ Sub</button>` : ''}
        <button class="btn soft" onclick="NOTE='';renderNotes()">Хаах</button></div>`;
   } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+}
+// Текстийн мөр бүр → тухайн main-ийн sub ажил ("1. ", "- " зэрэг угтварыг хасна)
+async function toSubs(parent, text, btn) {
+  const lines = text.split(/\r?\n/).map(l => l.replace(/^\s*(\d+[.)]|[-*•])\s*/, '').trim()).filter(Boolean);
+  if (!lines.length) return;
+  btn.disabled = true;
+  try { for (const l of lines) await postJSON('/api/tasks', { text: l, parent }); EXP.add(parent); }
+  catch (e) { alert(e.message); }
+  loadTasks();
 }
 async function addNote(id, btn) {
   const ta = btn.closest('.notes').querySelector('textarea'), t = ta.value.trim();
