@@ -173,6 +173,7 @@
       <select id="parent" hidden></select>
       <div class="line">
         <input id="taskText" placeholder="жш: Дархан руу 12 PC бэлдэх" onkeydown="if(event.key==='Enter')addTask()">
+        <input id="taskTag" list="tags" placeholder="Tag" autocomplete="off" style="width:80px;flex:none">
         <button class="btn" onclick="addTask()">+</button>
       </div>
     </div>
@@ -477,6 +478,8 @@ async function loadTasks() {
     const mover = (t, d) => `<select class="mv" aria-label="Цэс" onchange="move('${esc(t.id)}', this.value)">
         <option value="_" selected hidden>⋯</option>
         <option value="📷">📷 Зураг нэмэх</option>
+        <optgroup label="Tag">${TAGS.map(x => `<option value="tag:${esc(x)}">${esc(x)}</option>`).join('')}
+          <option value="tag:+">＋ Шинэ tag...</option><option value="tag:">↺ Автомат</option><option value="tag:-">✕ Tag-гүй</option></optgroup>
         ${d ? '' : (t.parent ? '<option value="">↑ Main болгох</option>' : '') +
           mains.filter(m => m.id !== t.id && m.id !== t.parent).map(m => `<option value="${esc(m.id)}">↳ ${esc(m.text)}</option>`).join('')}
       </select>`;
@@ -485,7 +488,7 @@ async function loadTasks() {
     // cnt = {open, total} — sub-тай main бол дарахад sub-ууд нээгдэнэ
     const row = (t, d, nested, cnt) => `<div class="task${d ? ' done' : ''}${nested ? ' sub' : ''}">
         <button class="check" ${d ? 'disabled' : `onclick="finish('${esc(t.id)}', this)"`} aria-label="Дууссан">${d ? '✓' : ''}</button>
-        <div style="flex:1"${cnt ? ` class="fold" onclick="toggle('${esc(t.id)}', this)"` : ''}><div class="t">${name(t, nested)}${cnt
+        <div style="flex:1"${cnt ? ` class="fold" onclick="toggle('${esc(t.id)}', this)"` : ''}><div class="t">${t.tag ? `<span class="tag">${esc(t.tag)}</span>` : ''}${name(t, nested)}${cnt
           ? ` <span class="cnt">${EXP.has(t.id) ? '▾' : '▸'} ${cnt.total - cnt.open}/${cnt.total}</span>` : ''}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
         ${d ? `<div class="note">${esc(t.done)}</div>` : ''}${thumbs(t)}</div>${mover(t, d)}</div>`;
     const tops = open.filter(t => !open.some(m => m.id === t.parent));
@@ -507,7 +510,7 @@ async function addTask() {
   if (!t) return;
   const parent = kind() === 'sub' ? $('#parent').value : '';
   if (kind() === 'sub' && !parent) return alert('Sub ажлын Main ажлыг сонгоно уу');
-  try { await postJSON('/api/tasks', { text: t, parent }); $('#taskText').value = ''; loadTasks(); }
+  try { await postJSON('/api/tasks', { text: t, parent, tag: $('#taskTag').value.trim() }); $('#taskText').value = ''; loadTasks(); }
   catch (e) { alert(e.message); }
 }
 const taskPick = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', multiple: true });
@@ -521,7 +524,13 @@ async function move(id, parent) {
     };
     taskPick.click(); return loadTasks();
   }
-  try { await postJSON('/api/tasks/move', { id, parent }); }
+  let body = { id, parent };
+  if (parent.startsWith('tag:')) {   // ⋯ → Tag
+    let tag = parent.slice(4);
+    if (tag === '+') { tag = (prompt('Шинэ tag:') || '').trim(); if (!tag) return loadTasks(); }
+    body = { id, tag };
+  }
+  try { await postJSON('/api/tasks/move', body); }
   catch (e) { alert(e.message); }
   loadTasks();
 }

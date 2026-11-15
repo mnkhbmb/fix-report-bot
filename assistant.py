@@ -34,8 +34,9 @@ _str = {"type": "string"}
 TOOLS = [
     {"name": "list_tasks", "description": "Хийх (дуусаагүй) ажлууд ба тэдгээрийн main/sub бүтэц.",
      "input_schema": {"type": "object", "properties": {}}},
-    {"name": "add_task", "description": "Ажил нэмнэ. parent = main ажлын ID (sub бол), эс бөгөөс хоосон.",
-     "input_schema": {"type": "object", "properties": {"text": _str, "parent": _str}, "required": ["text"]}},
+    {"name": "add_task", "description": "Ажил нэмнэ. parent = main ажлын ID (sub бол), эс бөгөөс хоосон. "
+     "tag = салбар/төсөл (жш Lof, Viot); хоосон бол автомат.",
+     "input_schema": {"type": "object", "properties": {"text": _str, "parent": _str, "tag": _str}, "required": ["text"]}},
     {"name": "finish_task", "description": "Ажлыг дуусгана, тайланд автоматаар бичигдэнэ.",
      "input_schema": {"type": "object", "properties": {"id": _str, "note": _str}, "required": ["id"]}},
     {"name": "move_task", "description": "Ажлыг өөр main-ийн sub болгоно (parent хоосон = main болгоно).",
@@ -66,7 +67,7 @@ def run_tool(sheets, name: str, a: dict, actions: list) -> str:
     if name == "list_tasks":
         return json.dumps([t for t in sheets.get_tasks() if t["status"] != "Хийсэн"], ensure_ascii=False)
     if name == "add_task":
-        return "Нэмэгдлээ: " + sheets.add_task(a["text"], a.get("parent", ""))
+        return "Нэмэгдлээ: " + sheets.add_task(a["text"], a.get("parent", ""), a.get("tag", ""))
     if name == "finish_task":
         return "Дууслаа" if sheets.finish_task(a["id"], a.get("note", "")) is not None else "Ажил олдсонгүй"
     if name == "move_task":

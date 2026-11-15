@@ -77,6 +77,18 @@ async def main():
         t = {t["id"]: t for t in s.get_tasks()}
         assert t[tid]["status"] == "Хийсэн" and t[sub]["parent"] == tid and "12 ширхэг бэлэн" in s.log[-1]["text"]
 
+        # ажлын tag: гараар → sub өвлөнө → дуусахад тайланд тэр tag-аар орно; солих / автомат / tag-гүй
+        vm = (await (await c.post("/api/tasks", json={"text": "Уулзалт", "tag": "Viot"}, headers=H)).json())["id"]
+        vs = (await (await c.post("/api/tasks", json={"text": "Слайд", "parent": vm}, headers=H)).json())["id"]
+        tg = lambda: {t["id"]: t["tag"] for t in s.get_tasks()}
+        assert tg()[vm] == tg()[vs] == "Viot" and tg()[tid] == ""
+        assert (await c.post("/api/tasks/done", json={"id": vs}, headers=H)).status == 200
+        assert s.log[-1]["tag"] == "Viot"
+        tt = lambda i, x: c.post("/api/tasks/move", json={"id": i, "tag": x}, headers=H)
+        assert (await tt(vm, "Lof")).status == 200 and tg()[vs] == "Lof"
+        assert (await tt(vs, "-")).status == 200 and tg()[vs] == ""
+        assert (await tt("T-9999", "Lof")).status == 400
+
         img = io.BytesIO(); Image.new("RGB", (3000, 2000), "red").save(img, "JPEG")
         fd = FormData()
         for k, v in [("src", "10-цирк"), ("dst", "Дархан"), ("giver", "Мөнхбямба"), ("receiver", "Бат"),

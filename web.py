@@ -229,11 +229,11 @@ async def tasks_get(request):
 
 async def tasks_post(request):
     d = await request.json()
-    text, parent = (d.get("text") or "").strip(), (d.get("parent") or "").strip()
+    text, parent, tag = ((d.get(k) or "").strip() for k in ("text", "parent", "tag"))
     if not text:
         return web.json_response({"error": "Хоосон байна"}, status=400)
     try:
-        tid = await db(request.app["sheets"].add_task, text, parent)
+        tid = await db(request.app["sheets"].add_task, text, parent, tag)
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"id": tid})
@@ -289,10 +289,12 @@ async def photo_get(request):
 
 
 async def tasks_move(request):
+    """{id, parent} → зөөх; {id, tag} → tag солих."""
     d = await request.json()
+    s = request.app["sheets"]
+    fn, val = (s.set_task_tag, d["tag"]) if "tag" in d else (s.move_task, d.get("parent"))
     try:
-        await db(request.app["sheets"].move_task,
-                                d.get("id", ""), (d.get("parent") or "").strip())
+        await db(fn, d.get("id", ""), (val or "").strip())
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
     return web.json_response({"ok": True})

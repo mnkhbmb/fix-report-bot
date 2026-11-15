@@ -68,7 +68,7 @@ def auto_tag(text: str) -> str:
     low = text.lower()
     return next((t for t in TAGS if t.lower() in low), "")
 TAB_TASK = "Ажлууд"    # хийх ажлын жагсаалт
-TASK_HEADERS = ["ID", "Ажил", "Төлөв", "Нэмсэн", "Дууссан", "Тэмдэглэл", "Эх", "Зураг"]   # Эх = main ажлын ID (sub бол), Зураг = файлын нэрс таслалаар
+TASK_HEADERS = ["ID", "Ажил", "Төлөв", "Нэмсэн", "Дууссан", "Тэмдэглэл", "Эх", "Зураг", "Tag"]   # Эх = main ажлын ID (sub бол), Зураг = файлын нэрс таслалаар
 # Тооцоо нь салбар бүрт тусдаа tab үүснэ: "Тооцоо-{branch}"
 TOO_PREFIX = "Тооцоо-"
 # Агуулах бас салбар бүрт тусдаа tab: "Агуулах-{branch}"
@@ -625,18 +625,31 @@ class SheetsClient:
             raise ValueError("Бичлэг олдсонгүй — хуудсаа шинэчилнэ үү")
         self._update_cell(TAB_LOG, row, col, value)
 
-    def add_task(self, text: str, parent: str = "") -> str:
+    def add_task(self, text: str, parent: str = "", tag: str = "") -> str:
         """parent өгвөл sub ажил — parent нь байгаа main ажил байх ёстой."""
         if parent and not any(t["id"] == parent and not t["parent"] for t in self.get_tasks()):
             raise ValueError("Main ажил олдсонгүй")
         tid = self._next_id(TAB_TASK, "T")
-        self._append_row(TAB_TASK, [tid, text, "Хийх", _now(), "", "", parent])
+        self._append_row(TAB_TASK, [tid, text, "Хийх", _now(), "", "", parent, "", tag])
         return tid
 
     def get_tasks(self) -> list[dict]:
-        keys = ["id", "text", "status", "created", "done", "note", "parent", "photos"]
-        return [dict(zip(keys, [_safe(r, i) for i in range(8)]))
-                for r in self._get_rows(TAB_TASK)[1:] if _safe(r, 0)]
+        """tag: гараар тавьсан → текстээс автомат → main-аасаа өвлөнө ("-" = tag-гүй)."""
+        keys = ["id", "text", "status", "created", "done", "note", "parent", "photos", "tag"]
+        tasks = [dict(zip(keys, [_safe(r, i) for i in range(9)]))
+                 for r in self._get_rows(TAB_TASK)[1:] if _safe(r, 0)]
+        own = {t["id"]: t["tag"] or auto_tag(t["text"]) for t in tasks}
+        for t in tasks:
+            tag = own[t["id"]] or own.get(t["parent"], "")
+            t["tag"] = "" if tag == "-" else tag
+        return tasks
+
+    def set_task_tag(self, tid: str, tag: str):
+        """tag='' → автомат, '-' → tag-гүй."""
+        row = self._find_row(TAB_TASK, 0, tid)
+        if row is None:
+            raise ValueError("Ажил олдсонгүй")
+        self._update_cell(TAB_TASK, row, "I", tag)
 
     def add_task_photos(self, tid: str, names: list[str]):
         row = self._find_row(TAB_TASK, 0, tid)
@@ -669,7 +682,7 @@ class SheetsClient:
         self._update_row(TAB_TASK, row, [tid, t["text"], "Хийсэн", t["created"], _now(), note, t["parent"]])
         main = tasks.get(t["parent"])
         name = f"{main['text']} › {t['text']}" if main else t["text"]
-        self.add_log(f"Дууссан: {name}" + (f" — {note}" if note else ""))
+        self.add_log(f"Дууссан: {name}" + (f" — {note}" if note else ""), tag=t["tag"])
         return t["text"]
 
     # ── Тооцоо / Хаалт ─────────────────────────────────────────────────────────
