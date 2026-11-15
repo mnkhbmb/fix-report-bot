@@ -227,6 +227,22 @@ async def tasks_get(request):
     return web.json_response(await db(request.app["sheets"].get_tasks))
 
 
+async def notes_get(request):
+    return web.json_response(await db(request.app["sheets"].get_task_notes, request.query.get("id", "")))
+
+
+async def notes_post(request):
+    d = await request.json()
+    text = (d.get("text") or "").strip()
+    if not text:
+        return web.json_response({"error": "Хоосон байна"}, status=400)
+    try:
+        await db(request.app["sheets"].add_task_note, d.get("id", ""), text)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=404)
+    return web.json_response({"ok": True})
+
+
 async def tasks_post(request):
     d = await request.json()
     text, parent, tag, due = ((d.get(k) or "").strip() for k in ("text", "parent", "tag", "due"))
@@ -363,6 +379,8 @@ def make_app(sheets, bot=None) -> web.Application:
     app.router.add_post("/api/tasks", tasks_post)
     app.router.add_post("/api/tasks/done", tasks_done)
     app.router.add_post("/api/tasks/move", tasks_move)
+    app.router.add_get("/api/tasks/notes", notes_get)
+    app.router.add_post("/api/tasks/notes", notes_post)
     app.router.add_post("/api/chat", chat_post)
     app.router.add_post("/api/log/tag", log_tag)
     app.router.add_post("/api/tasks/photo", task_photo)

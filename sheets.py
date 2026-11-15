@@ -68,6 +68,8 @@ def auto_tag(text: str) -> str:
     low = text.lower()
     return next((t for t in TAGS if t.lower() in low), "")
 TAB_TASK = "Ажлууд"    # хийх ажлын жагсаалт
+TAB_NOTE = "Ажлын тэмдэглэл"   # ажил дээр өдөр өдрөөр юу болсныг чөлөөтэй бичнэ
+NOTE_HEADERS = ["Ажил ID", "Огноо", "Цаг", "Бичлэг"]
 TASK_HEADERS = ["ID", "Ажил", "Төлөв", "Нэмсэн", "Дууссан", "Тэмдэглэл", "Эх", "Зураг", "Tag", "Яаралтай", "Дуусах"]   # Яаралтай = "1", Дуусах = YYYY-MM-DD
 # Эх = main ажлын ID (sub бол), Зураг = файлын нэрс таслалаар
 # Тооцоо нь салбар бүрт тусдаа tab үүснэ: "Тооцоо-{branch}"
@@ -173,6 +175,7 @@ class SheetsClient:
     _BASE_TABS = [
         (TAB_REP, REP_HEADERS), (TAB_FIX, FIX_HEADERS), (TAB_SHP, SHP_HEADERS),
         (TAB_ACT, ACT_HEADERS), (TAB_LOG, LOG_HEADERS), (TAB_TASK, TASK_HEADERS),
+        (TAB_NOTE, NOTE_HEADERS),
     ]
 
     def _ensure_tabs(self):
@@ -683,6 +686,16 @@ class SheetsClient:
                 if t["parent"] == tid:
                     self._update_cell(TAB_TASK, self._find_row(TAB_TASK, 0, t["id"]), "G", parent)
         self._update_cell(TAB_TASK, self._find_row(TAB_TASK, 0, tid), "G", parent)
+
+    def add_task_note(self, tid: str, text: str):
+        if self._find_row(TAB_TASK, 0, tid) is None:
+            raise ValueError("Ажил олдсонгүй")
+        now = datetime.now()
+        self._append_row(TAB_NOTE, [tid, now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), text])
+
+    def get_task_notes(self, tid: str) -> list[dict]:
+        return [{"date": _safe(r, 1), "time": _safe(r, 2), "text": _safe(r, 3)}
+                for r in self._get_rows(TAB_NOTE)[1:] if _safe(r, 0) == tid]
 
     def finish_task(self, tid: str, note: str) -> Optional[str]:
         """Ажлыг дуусгаж, тайланд бичнэ ("Main › Sub" хэлбэрээр). Ажлын текстийг буцаана."""

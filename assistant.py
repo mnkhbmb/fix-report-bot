@@ -19,7 +19,7 @@ SYSTEM = f"""Чи The Lof интернэт кафены IT ажилтны ажл
 өдрийн тайланд бичлэг нэмэх, тайлан харах/PDF гаргах, хүлээлцэх акт бэлдэх, өмнөх актаас хайх.
 
 Дүрэм:
-- Sheet-д бичих үйлдлийн өмнө (add_task, finish_task, move_task, add_log, set_log_tag) юу бичихээ товч жагсаагаад \
+- Sheet-д бичих үйлдлийн өмнө (add_task, finish_task, move_task, add_log, set_log_tag, add_task_note) юу бичихээ товч жагсаагаад \
 "Зөв үү?" гэж асуу. Хэрэглэгч зөвшөөрсний ДАРАА л tool дууд. Унших tool-уудыг шууд дуудаж болно.
 - Дутуу мэдээллийг эргэж асуу: акт бол хаанаас, хаашаа, юу, хэдэн ширхэг, серийн дугаар (байвал), \
 хэн өгч хэн авсан; ажил дуусгах бол аль ажил, юу хийж дуусгасан.
@@ -40,6 +40,10 @@ TOOLS = [
                                                       "urgent": {"type": "boolean"}, "due": _str}, "required": ["text"]}},
     {"name": "finish_task", "description": "Ажлыг дуусгана, тайланд автоматаар бичигдэнэ.",
      "input_schema": {"type": "object", "properties": {"id": _str, "note": _str}, "required": ["id"]}},
+    {"name": "add_task_note", "description": "Ажил дээр өнөөдөр юу болсон тухай чөлөөт тэмдэглэл бичнэ.",
+     "input_schema": {"type": "object", "properties": {"id": _str, "text": _str}, "required": ["id", "text"]}},
+    {"name": "get_task_notes", "description": "Ажлын бүх тэмдэглэл (огноо, цаг, текст).",
+     "input_schema": {"type": "object", "properties": {"id": _str}, "required": ["id"]}},
     {"name": "move_task", "description": "Ажлыг өөр main-ийн sub болгоно (parent хоосон = main болгоно).",
      "input_schema": {"type": "object", "properties": {"id": _str, "parent": _str}, "required": ["id", "parent"]}},
     {"name": "add_log", "description": "Тайланд хийсэн ажлын бичлэг нэмнэ. date=YYYY-MM-DD (хоосон = өнөөдөр).",
@@ -72,6 +76,11 @@ def run_tool(sheets, name: str, a: dict, actions: list) -> str:
                                                "1" if a.get("urgent") else "", a.get("due", ""))
     if name == "finish_task":
         return "Дууслаа" if sheets.finish_task(a["id"], a.get("note", "")) is not None else "Ажил олдсонгүй"
+    if name == "add_task_note":
+        sheets.add_task_note(a["id"], a["text"])
+        return "Тэмдэглэгдлээ"
+    if name == "get_task_notes":
+        return json.dumps(sheets.get_task_notes(a["id"]), ensure_ascii=False)
     if name == "move_task":
         sheets.move_task(a["id"], a.get("parent", ""))
         return "Зөөгдлөө"

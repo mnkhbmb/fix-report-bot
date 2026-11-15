@@ -33,6 +33,10 @@
   .tag { display: inline-block; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent);
          padding: 1px 7px; border-radius: 999px; margin-right: 6px; }
   .task.sub { margin-left: 30px; }
+  .notes { margin: 0 0 10px 38px; padding: 10px; background: var(--bg); border-radius: 10px; }
+  .notes .nt { padding: 4px 0; border-bottom: 1px solid var(--line); white-space: pre-wrap; font-size: 15px; }
+  .notes .nt time { color: var(--muted); font-size: 12px; margin-right: 6px; }
+  .notes textarea { margin-top: 8px; }
   .due { font-size: 12px; color: var(--muted); margin-left: 6px; white-space: nowrap; }
   .due.late { color: var(--danger); font-weight: 600; }
   select.mv { flex: none; width: 40px; padding: 4px 0; text-align: center; font-size: 16px;
@@ -494,6 +498,7 @@ async function loadTasks() {
     // ⋯ цэс: зураг нэмэх + (дуусаагүй бол) зөөх
     const mover = (t, d) => `<select class="mv" aria-label="Цэс" onchange="move('${esc(t.id)}', this.value)">
         <option value="_" selected hidden>⋯</option>
+        <option value="📝">📝 Тэмдэглэл</option>
         <option value="📷">📷 Зураг нэмэх</option>
         <optgroup label="Tag">${TAGS.map(x => `<option value="tag:${esc(x)}">${esc(x)}</option>`).join('')}
           <option value="tag:+">＋ Шинэ tag...</option><option value="tag:">↺ Автомат</option><option value="tag:-">✕ Tag-гүй</option></optgroup>
@@ -505,7 +510,7 @@ async function loadTasks() {
     const thumbs = t => t.photos ? `<div class="thumbs" onclick="event.stopPropagation()">${t.photos.split(',').map(p =>
         `<a href="/photos/${esc(p)}" target="_blank" rel="noopener"><img src="/photos/${esc(p)}" loading="lazy" alt=""></a>`).join('')}</div>` : '';
     // cnt = {open, total} — sub-тай main бол дарахад sub-ууд нээгдэнэ
-    const row = (t, d, nested, cnt) => `<div class="task${d ? ' done' : ''}${nested ? ' sub' : ''}">
+    const row = (t, d, nested, cnt) => `<div class="task${d ? ' done' : ''}${nested ? ' sub' : ''}" data-id="${esc(t.id)}">
         <button class="check" ${d ? 'disabled' : `onclick="finish('${esc(t.id)}', this)"`} aria-label="Дууссан">${d ? '✓' : ''}</button>
         <div style="flex:1"${cnt ? ` class="fold" onclick="toggle('${esc(t.id)}', this)"` : ''}><div class="t">${t.tag ? `<span class="tag">${esc(t.tag)}</span>` : ''}${t.urgent && !d ? '🔥 ' : ''}${name(t, nested)}${dueTag(t, d)}${cnt
           ? ` <span class="cnt">${EXP.has(t.id) ? '▾' : '▸'} ${cnt.total - cnt.open}/${cnt.total}</span>` : ''}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
@@ -522,6 +527,7 @@ async function loadTasks() {
     $('#parent').innerHTML = '<option value="">— Main ажил сонгох —</option>' +
       open.filter(t => !t.parent).map(t => `<option value="${esc(t.id)}">${esc(t.text)}</option>`).join('');
     $('#parent').value = keep;
+    renderNotes();
   } catch (e) { $('#taskList').innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
 }
 async function addTask() {
@@ -547,6 +553,7 @@ async function move(id, parent) {
     taskPick.click(); return loadTasks();
   }
   let body = { id, parent };
+  if (parent === '📝') { NOTE = NOTE === id ? '' : id; return loadTasks(); }
   if (parent === 'due') {   // огноо сонгогч (утсан дээр календарь) — showPicker дэмжихгүй бол prompt
     const dp = $('#duePick');
     dp.value = ''; dp.onchange = () => dp.value && setTask(id, { due: dp.value });
@@ -572,6 +579,31 @@ function dueTag(t, d) {
   if (!t.due || d) return '';
   const today = ymd(new Date());
   return `<span class="due${t.due <= today ? ' late' : ''}">📅 ${t.due === today ? 'Өнөөдөр' : esc(t.due.slice(5))}</span>`;
+}
+// 📝 Ажлын тэмдэглэл — нэг удаад нэг ажлынх нээгдэнэ, мөрийн доор
+let NOTE = '';
+async function renderNotes() {
+  document.querySelectorAll('.notes').forEach(n => n.remove());
+  const row = NOTE && document.querySelector(`.task[data-id="${CSS.escape(NOTE)}"]`);
+  if (!row) return;
+  const box = Object.assign(document.createElement('div'), { className: 'notes', innerHTML: '<p class="muted">Ачаалж байна...</p>' });
+  row.after(box);
+  const id = NOTE;
+  try {
+    const list = await (await api('/api/tasks/notes?id=' + encodeURIComponent(id))).json();
+    box.innerHTML = (list.length ? list.map(n => `<div class="nt"><time>${esc(n.date.slice(5))} ${esc(n.time)}</time>${esc(n.text)}</div>`).join('')
+      : '<p class="muted" style="margin:0">Тэмдэглэл алга.</p>') +
+      `<textarea rows="3" placeholder="Өнөөдөр юу болсон бэ..."></textarea>
+       <div class="line"><button class="btn" style="flex:1" onclick="addNote('${esc(id)}', this)">Хадгалах</button>
+       <button class="btn soft" onclick="NOTE='';renderNotes()">Хаах</button></div>`;
+  } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+}
+async function addNote(id, btn) {
+  const ta = btn.closest('.notes').querySelector('textarea'), t = ta.value.trim();
+  if (!t) return;
+  btn.disabled = true;
+  try { await postJSON('/api/tasks/notes', { id, text: t }); renderNotes(); }
+  catch (e) { alert(e.message); btn.disabled = false; }
 }
 const PEND = new Set();
 async function finish(id, btn) {

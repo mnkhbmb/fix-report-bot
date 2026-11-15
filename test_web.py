@@ -10,7 +10,7 @@ import sheets as sh
 class MemSheets(sh.SheetsClient):
     """Жинхэнэ SheetsClient логик, зөвхөн хадгалалт нь санах ойд."""
     def __init__(self):
-        self.data = {sh.TAB_LOG: [sh.LOG_HEADERS], sh.TAB_TASK: [sh.TASK_HEADERS], sh.TAB_ACT: [sh.ACT_HEADERS]}
+        self.data = {sh.TAB_LOG: [sh.LOG_HEADERS], sh.TAB_TASK: [sh.TASK_HEADERS], sh.TAB_ACT: [sh.ACT_HEADERS], sh.TAB_NOTE: [sh.NOTE_HEADERS]}
     def _get_rows(self, tab, sheet_id=None): return [list(r) for r in self.data[tab]]
     def _append_row(self, tab, row, sheet_id=None): self.data[tab].append(list(row))
     def _update_row(self, tab, n, values, sheet_id=None): self.data[tab][n - 1] = list(values)
@@ -88,6 +88,12 @@ async def main():
         assert (await tt(vm, "Lof")).status == 200 and tg()[vs] == "Lof"
         assert (await tt(vs, "-")).status == 200 and tg()[vs] == ""
         assert (await tt("T-9999", "Lof")).status == 400
+        # 📝 ажлын тэмдэглэл
+        nt = lambda i, x: c.post("/api/tasks/notes", json={"id": i, "text": x}, headers=H)
+        assert (await nt(vm, "Утсаар ярьсан, маргааш уулзана")).status == 200
+        assert (await nt(vm, " ")).status == 400 and (await nt("T-9999", "x")).status == 404
+        ns = await (await c.get(f"/api/tasks/notes?id={vm}", headers=H)).json()
+        assert [n["text"] for n in ns] == ["Утсаар ярьсан, маргааш уулзана"] and ns[0]["time"]
         # яаралтай + дуусах хугацаа
         uj = (await (await c.post("/api/tasks", json={"text": "Сервер унасан", "urgent": True, "due": "2026-11-16"}, headers=H)).json())["id"]
         t = {x["id"]: x for x in s.get_tasks()}[uj]
