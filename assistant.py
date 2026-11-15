@@ -7,7 +7,7 @@ import json
 import os
 from datetime import datetime
 
-from sheets import TAGS, db
+from sheets import TAGS, USERS, can_see, db
 
 MODEL = "claude-opus-5-5"
 WD = ["Даваа", "Мягмар", "Лхагва", "Пүрэв", "Баасан", "Бямба", "Ням"]
@@ -28,7 +28,8 @@ SYSTEM = f"""Чи The Lof интернэт кафены IT ажилтны ажл
 - Дуу хоолойгоор бичигдсэн тул нэр, тоо, серийн дугаарыг давтаж баталгаажуул.
 - Огноо: "өчигдөр", "энэ 7 хоног" гэхийг өнөөдрөөс тооцоол. 7 хоног = Даваа–Ням.
 - Салбарууд: түмэн, 2-спортын-төв-ордон, 3-энхтайваны-төв-ордон, 4-муис, 4-ps, 8-19, 9-суис, 10-цирк, Дархан.
-- Tag: {", ".join(TAGS)} (текстэд байвал автомат, өөр tag хэрэглэгч хэлбэл тавь)."""
+- Tag: {", ".join(TAGS)} (текстэд байвал автомат, өөр tag хэрэглэгч хэлбэл тавь).
+- Ажил, тайлан нь хувийн (зөвхөн хэрэглэгч өөрөө харна) эсвэл багийн (team=true, бүгд харна) байна. "Багийн", "бүгдэд" гэж хэлбэл team=true, эс бөгөөс хувийн."""
 
 _str = {"type": "string"}
 TOOLS = [
@@ -37,7 +38,8 @@ TOOLS = [
     {"name": "add_task", "description": "Ажил нэмнэ. parent = main ажлын ID (sub бол), эс бөгөөс хоосон. "
      "tag = салбар/төсөл (жш Lof, Viot); хоосон бол автомат. urgent = яаралтай эсэх, due = дуусах огноо YYYY-MM-DD.",
      "input_schema": {"type": "object", "properties": {"text": _str, "parent": _str, "tag": _str,
-                                                      "urgent": {"type": "boolean"}, "due": _str}, "required": ["text"]}},
+                                                      "urgent": {"type": "boolean"}, "due": _str,
+                                                      "team": {"type": "boolean"}}, "required": ["text"]}},
     {"name": "finish_task", "description": "Ажлыг дуусгана, тайланд автоматаар бичигдэнэ.",
      "input_schema": {"type": "object", "properties": {"id": _str, "note": _str}, "required": ["id"]}},
     {"name": "add_task_note", "description": "Ажил дээр өнөөдөр юу болсон тухай чөлөөт тэмдэглэл бичнэ.",
@@ -47,8 +49,10 @@ TOOLS = [
     {"name": "move_task", "description": "Ажлыг өөр main-ийн sub болгоно (parent хоосон = main болгоно).",
      "input_schema": {"type": "object", "properties": {"id": _str, "parent": _str}, "required": ["id", "parent"]}},
     {"name": "add_log", "description": "Тайланд хийсэн ажлын бичлэг нэмнэ. date=YYYY-MM-DD (хоосон = өнөөдөр).",
-     "input_schema": {"type": "object", "properties": {"text": _str, "date": _str, "tag": _str}, "required": ["text"]}},
-    {"name": "get_log", "description": "Огнооны хүрээн дэх тайлангийн бичлэгүүд (YYYY-MM-DD, хоёулаа орно).",
+     "input_schema": {"type": "object", "properties": {"text": _str, "date": _str, "tag": _str,
+                                                      "team": {"type": "boolean"}}, "required": ["text"]}},
+    {"name": "get_log", "description": "Огнооны хүрээн дэх тайлангийн бичлэгүүд (YYYY-MM-DD, хоёулаа орно): "
+     "хэрэглэгчийн өөрийн болон багийн. who = бичсэн хүн.",
      "input_schema": {"type": "object", "properties": {"start": _str, "end": _str, "tag": _str}, "required": ["start", "end"]}},
     {"name": "set_log_tag", "description": "Тайлангийн бичлэгийн tag-ийг солино. row, text-ийг get_log-оос ав. "
      "tag='' → автомат, '-' → tag-гүй.",
@@ -67,32 +71,39 @@ TOOLS = [
 ]
 
 
-def run_tool(sheets, name: str, a: dict, actions: list) -> str:
-    """Tool-ийг гүйцэтгэнэ. Утсан дээр хийх зүйлийг (PDF, акт маягт) actions-д нэмнэ."""
+def run_tool(sheets, name: str, a: dict, actions: list, me: str = "") -> str:
+    """Tool-ийг me хэрэглэгчийн нэрээс гүйцэтгэнэ (бусдын хувийн ажлыг харахгүй, өөрчлөхгүй).
+    Утсан дээр хийх зүйлийг (PDF, акт маягт) actions-д нэмнэ."""
+    team = "1" if a.get("team") else ""
+    for k in ("id", "parent"):   # ажлын ID-тэй бүх tool: харж чадах ажил байх ёстой
+        if a.get(k) and name != "get_log":
+            sheets.task_for(a[k], me)
     if name == "list_tasks":
-        return json.dumps([t for t in sheets.get_tasks() if t["status"] != "Хийсэн"], ensure_ascii=False)
+        return json.dumps([t for t in sheets.get_tasks() if t["status"] != "Хийсэн" and can_see(t, me)], ensure_ascii=False)
     if name == "add_task":
         return "Нэмэгдлээ: " + sheets.add_task(a["text"], a.get("parent", ""), a.get("tag", ""),
-                                               "1" if a.get("urgent") else "", a.get("due", ""))
+                                               "1" if a.get("urgent") else "", a.get("due", ""), me, team)
     if name == "finish_task":
-        return "Дууслаа" if sheets.finish_task(a["id"], a.get("note", "")) is not None else "Ажил олдсонгүй"
+        return "Дууслаа" if sheets.finish_task(a["id"], a.get("note", ""), me) is not None else "Ажил олдсонгүй"
     if name == "add_task_note":
-        sheets.add_task_note(a["id"], a["text"])
+        sheets.add_task_note(a["id"], a["text"], me)
         return "Тэмдэглэгдлээ"
     if name == "get_task_notes":
-        return json.dumps(sheets.get_task_notes(a["id"]), ensure_ascii=False)
+        return json.dumps([{**n, "who": USERS.get(n["who"], n["who"])} for n in sheets.get_task_notes(a["id"])],
+                          ensure_ascii=False)
     if name == "move_task":
         sheets.move_task(a["id"], a.get("parent", ""))
         return "Зөөгдлөө"
     if name == "add_log":
         datetime.strptime(a["date"], "%Y-%m-%d") if a.get("date") else None   # буруу огноо → алдаа
-        sheets.add_log(a["text"], a.get("date", ""), a.get("tag", ""))
+        sheets.add_log(a["text"], a.get("date", ""), a.get("tag", ""), me, team)
         return "Бичигдлээ"
     if name == "set_log_tag":
-        sheets.set_log_tag(int(a["row"]), a["text"], a["tag"])
+        sheets.set_log_tag(int(a["row"]), a["text"], a["tag"], me)
         return "Tag солигдлоо"
     if name == "get_log":
-        return json.dumps(sheets.get_log(a["start"], a["end"], a.get("tag", "")), ensure_ascii=False)
+        rows = [e for e in sheets.get_log(a["start"], a["end"], a.get("tag", "")) if e["who"] == me or e["team"] == "1"]
+        return json.dumps([{**e, "who": USERS.get(e["who"], e["who"])} for e in rows], ensure_ascii=False)
     if name == "search_acts":
         return json.dumps(sheets.get_acts(a["q"])[:30], ensure_ascii=False)
     if name in ("report_pdf", "prepare_act"):
@@ -101,12 +112,12 @@ def run_tool(sheets, name: str, a: dict, actions: list) -> str:
     raise ValueError(f"Үл мэдэх tool: {name}")
 
 
-async def chat(sheets, history: list[dict]) -> tuple[str, list]:
+async def chat(sheets, history: list[dict], me: str = "") -> tuple[str, list]:
     """history = [{role, content: str}, ...] (утсан дээр хадгалагдана). → (хариу, actions)"""
     import anthropic
     client = anthropic.AsyncAnthropic()
     now = datetime.now()
-    system = SYSTEM + f"\n\nӨнөөдөр: {now:%Y-%m-%d}, {WD[now.weekday()]}."
+    system = SYSTEM + f"\n\nӨнөөдөр: {now:%Y-%m-%d}, {WD[now.weekday()]}. Хэрэглэгч: {USERS.get(me, me) or 'админ'}."
     messages = [{"role": m["role"], "content": m["content"]} for m in history[-30:]]   # ponytail: сүүлийн 30
     actions = []
     for _ in range(8):   # ponytail: нэг ээлжинд tool-ын 8 тойрог хангалттай
@@ -126,7 +137,7 @@ async def chat(sheets, history: list[dict]) -> tuple[str, list]:
             if b.type != "tool_use":
                 continue
             try:
-                out, err = await db(run_tool, sheets, b.name, b.input, actions), False
+                out, err = await db(run_tool, sheets, b.name, b.input, actions, me), False
             except Exception as e:   # алдааг Claude-д буцааж, өөрөө засуулна
                 out, err = f"Алдаа: {e}", True
             results.append({"type": "tool_result", "tool_use_id": b.id, "content": out, "is_error": err})

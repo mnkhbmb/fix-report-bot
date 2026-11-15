@@ -131,13 +131,27 @@
   nav button { border: 0; background: none; color: var(--muted); padding: 6px 0; font-size: 12px; }
   nav button span { display: block; font-size: 22px; }
   nav button.on { color: var(--accent); font-weight: 600; }
+  #login { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: grid; place-items: center; text-align: center; padding: 16px; }
+  .by { color: var(--accent); font-weight: 600; margin-right: 4px; }
 </style>
 </head>
 <body>
 <header>
-  <small>The Lof · <a href="{{SHEET_URL}}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">📊 Sheet нээх</a></small>
+  <small>The Lof<span id="sheetLink" hidden> · <a href="{{SHEET_URL}}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">📊 Sheet нээх</a></span><span id="who"></span></small>
   <h1 id="title">✅ Ажлууд</h1>
+  <div class="seg" id="scope" hidden style="margin:8px 0 0">
+    <button type="button" class="chip on" data-v="me">👤 Миний</button>
+    <button type="button" class="chip" data-v="team">👥 Баг</button>
+  </div>
 </header>
+<div id="login" hidden>
+  <div>
+    <h1>The Lof</h1>
+    <p class="muted">Ажлын апп-д нэвтрэх</p>
+    <div id="gbtn" style="display:inline-block;margin-top:12px"></div>
+    <p id="loginErr" style="color:var(--danger)"></p>
+  </div>
+</div>
 
 <main>
   <!-- ═══ ТАЙЛАН ═══ -->
@@ -277,6 +291,7 @@ async function call(path, opts) {
   let pin = ''; try { pin = localStorage.pin || ''; } catch {}
   const r = await fetch(path, { ...opts, headers: { ...(opts.headers || {}), 'X-PIN': pin } });
   if (r.status === 401) {
+    if ((await r.clone().json().catch(() => ({}))).login) { showLogin(); throw new Error('Нэвтэрнэ үү'); }
     const p = prompt('PIN код');
     if (p === null) throw new Error('PIN шаардлагатай');
     try { localStorage.pin = p; } catch {}
@@ -291,10 +306,40 @@ function download(blob, name) {
   a.href = URL.createObjectURL(blob); a.download = name; a.click();
 }
 
+// ── Нэвтрэх (Google) ба хэрэглэгч ──
+const GCID = '{{GOOGLE_CLIENT_ID}}';
+let ME = { email: '', name: '', users: {}, login: false };
+const nameOf = e => ME.users[e] || (e || '').split('@')[0];
+const by = e => scope() === 'team' && e.who ? `<span class="by">${esc(nameOf(e.who))}:</span>` : '';   // багийн тайланд хэн бичсэн
+function showLogin() {
+  $('#login').hidden = false;
+  const render = () => {
+    google.accounts.id.initialize({ client_id: GCID, callback: async res => {
+      const r = await fetch('/auth/google', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                              body: JSON.stringify({ credential: res.credential }) });
+      if (r.ok) return location.reload();
+      $('#loginErr').textContent = (await r.json().catch(() => ({}))).error || 'Нэвтэрч чадсангүй';
+    } });
+    google.accounts.id.renderButton($('#gbtn'), { theme: 'filled_blue', size: 'large', shape: 'pill' });
+  };
+  if (window.google?.accounts) return render();
+  if (document.querySelector('script[src*="gsi/client"]')) return;
+  const sc = Object.assign(document.createElement('script'), { src: 'https://accounts.google.com/gsi/client', onload: render });
+  document.head.append(sc);
+}
+async function logout() {
+  await fetch('/auth/logout', { method: 'POST' });
+  location.reload();
+}
+
 // ── Табууд ──
 const titles = { log: '📝 Тайлан', tasks: '✅ Ажлууд', act: '📄 Акт', ai: '🎤 Туслах' };
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => show(b.dataset.tab));
+let CUR = 'tasks';
+const scope = seg('scope', () => show(CUR));   // 👤 Миний / 👥 Баг — Ажлууд, Тайлан хоёрт
 function show(tab) {
+  CUR = tab;
+  $('#scope').hidden = !ME.login || !['log', 'tasks'].includes(tab);
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   ['log', 'tasks', 'act', 'ai'].forEach(t => $('#tab-' + t).hidden = t !== tab);
   $('#title').textContent = titles[tab];
@@ -326,7 +371,7 @@ async function askAI() {
 }
 async function doAction(a) {
   if (a.type === 'report_pdf') {
-    const qs = `from=${a.start}&to=${a.end}&tag=${encodeURIComponent(a.tag || '')}`;
+    const qs = `from=${a.start}&to=${a.end}&tag=${encodeURIComponent(a.tag || '')}&scope=${scope()}`;
     download(await (await api('/api/report.pdf?' + qs)).blob(), `Тайлан-${a.start}_${a.end}.pdf`);
   }
   if (a.type === 'prepare_act') {   // маягтыг бөглөөд Акт таб руу — зураг нэмээд өөрөө илгээнэ
@@ -380,7 +425,7 @@ function range() {
   }
   return [ymd(new Date(d.getFullYear(), d.getMonth(), 1)), ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0))];
 }
-const q = () => { const [a, b] = range(); return `from=${a}&to=${b}&tag=${encodeURIComponent($('#tagFilter').value)}`; };
+const q = () => { const [a, b] = range(); return `from=${a}&to=${b}&tag=${encodeURIComponent($('#tagFilter').value)}&scope=${scope()}`; };
 async function loadLog() {
   const [a, b] = range();
   $('#rangeLbl').textContent = a === b ? a : `${a} — ${b}`;
@@ -404,8 +449,8 @@ async function loadLog() {
       const tops = groupDay(days[d]);
       return `<div class="day"><h3>${esc(days[d][0].label)}</h3>` + tops.map(n => {
         const kids = n.kids.length ? `<div class="subl">${n.kids.map(k =>
-          `<div class="kid"><div style="flex:1">${mark(k.e)}${esc(k.label)}</div>${menu(k.e, tops)}</div>`).join('')}</div>` : '';
-        const head = n.e ? mark(n.e) + esc(body(n.e)) : `<b>${esc(n.key)}</b>`;
+          `<div class="kid"><div style="flex:1">${by(k.e)}${mark(k.e)}${esc(k.label)}</div>${menu(k.e, tops)}</div>`).join('')}</div>` : '';
+        const head = n.e ? by(n.e) + mark(n.e) + esc(body(n.e)) : `<b>${esc(n.key)}</b>`;
         return `<div class="entry${n.e ? (isFin(n.e) ? ' fin' : '') : ' fin'}" style="display:flex;gap:8px;align-items:center;white-space:normal">
           <div style="flex:1;white-space:pre-wrap"><time>${esc(n.e ? n.e.time : '')}</time>${n.e && n.e.tag ? `<span class="tag">${esc(n.e.tag)}</span>` : ''}${head}${kids}</div>${n.e ? menu(n.e, tops) : ''}</div>`;
       }).join('') + '</div>';
@@ -453,7 +498,7 @@ async function addLog(btn) {
   if (!t) return;
   btn.disabled = true;
   try {
-    await postJSON('/api/log', { text: t, date: $('#logDate').value, tag: $('#logTag').value });
+    await postJSON('/api/log', { text: t, date: $('#logDate').value, tag: $('#logTag').value, team: scope() === 'team' });
     $('#logText').value = ''; await loadLog();
   } catch (e) { alert(e.message); }
   btn.disabled = false;
@@ -478,7 +523,8 @@ function toggle(id, el) {
 }
 async function loadTasks() {
   try {
-    const all = await (await api('/api/tasks')).json();
+    const team = scope() === 'team';   // 👥 Баг бол багийн, эс бөгөөс хувийн ажлууд (sub нь main-аасаа өвлөнө)
+    const all = (await (await api('/api/tasks')).json()).filter(t => (t.team === '1') === team);
     const byId = BYID = Object.fromEntries(all.map(t => [t.id, t]));
     const isDone = t => t.status === 'Хийсэн' || PEND.has(t.id);   // хадгалагдаж байгааг дахин харуулахгүй
     // шүүлт: tag эсвэл 🔥 яаралтай. Сонголтыг TAGS + ажлууд дээрх tag-уудаас бүрдүүлнэ
@@ -499,6 +545,7 @@ async function loadTasks() {
     const mover = (t, d) => `<select class="mv" aria-label="Цэс" onchange="move('${esc(t.id)}', this.value)">
         <option value="_" selected hidden>⋯</option>
         <option value="📝">📝 Тэмдэглэл</option>
+        ${ME.login && !t.parent && !d && t.owner === ME.email ? `<option value="team:${team ? '' : '1'}">${team ? '👤 Миний руу шилжүүлэх' : '👥 Баг руу шилжүүлэх'}</option>` : ''}
         <option value="📷">📷 Зураг нэмэх</option>
         <optgroup label="Tag">${TAGS.map(x => `<option value="tag:${esc(x)}">${esc(x)}</option>`).join('')}
           <option value="tag:+">＋ Шинэ tag...</option><option value="tag:">↺ Автомат</option><option value="tag:-">✕ Tag-гүй</option></optgroup>
@@ -512,7 +559,7 @@ async function loadTasks() {
     // cnt = {open, total} — sub-тай main бол дарахад sub-ууд нээгдэнэ
     const row = (t, d, nested, cnt) => `<div class="task${d ? ' done' : ''}${nested ? ' sub' : ''}" data-id="${esc(t.id)}">
         <button class="check" ${d ? 'disabled' : `onclick="finish('${esc(t.id)}', this)"`} aria-label="Дууссан">${d ? '✓' : ''}</button>
-        <div style="flex:1"${cnt ? ` class="fold" onclick="toggle('${esc(t.id)}', this)"` : ''}><div class="t">${t.tag ? `<span class="tag">${esc(t.tag)}</span>` : ''}${t.urgent && !d ? '🔥 ' : ''}${name(t, nested)}${dueTag(t, d)}${cnt
+        <div style="flex:1"${cnt ? ` class="fold" onclick="toggle('${esc(t.id)}', this)"` : ''}><div class="t">${t.tag ? `<span class="tag">${esc(t.tag)}</span>` : ''}${t.urgent && !d ? '🔥 ' : ''}${name(t, nested)}${team && !nested ? `<span class="note"> · ${esc(nameOf(t.owner))}</span>` : ''}${dueTag(t, d)}${cnt
           ? ` <span class="cnt">${EXP.has(t.id) ? '▾' : '▸'} ${cnt.total - cnt.open}/${cnt.total}</span>` : ''}</div>${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
         ${d ? `<div class="note">${esc(t.done)}</div>` : ''}${thumbs(t)}</div>${mover(t, d)}</div>`;
     const tops = open.filter(t => !open.some(m => m.id === t.parent) && (hit(t) || open.some(s => s.parent === t.id && hit(s))));
@@ -536,7 +583,8 @@ async function addTask() {
   const parent = kind() === 'sub' ? $('#parent').value : '';
   if (kind() === 'sub' && !parent) return alert('Sub ажлын Main ажлыг сонгоно уу');
   try {
-    await postJSON('/api/tasks', { text: t, parent, tag: $('#taskTag').value.trim(), due: $('#taskDue').value, urgent: $('#taskUrg').classList.contains('on') });
+    await postJSON('/api/tasks', { text: t, parent, tag: $('#taskTag').value.trim(), due: $('#taskDue').value,
+                                   urgent: $('#taskUrg').classList.contains('on'), team: scope() === 'team' });
     $('#taskText').value = ''; $('#taskDue').value = ''; $('#taskUrg').classList.remove('on'); loadTasks();
   }
   catch (e) { alert(e.message); }
@@ -561,6 +609,7 @@ async function move(id, parent) {
     return loadTasks();
   }
   if (parent.startsWith('urg:')) return setTask(id, { urgent: parent.slice(4) });
+  if (parent.startsWith('team:')) return setTask(id, { team: parent.slice(5) });
   if (parent.startsWith('due:')) return setTask(id, { due: '' });
   if (parent.startsWith('tag:')) {   // ⋯ → Tag
     let tag = parent.slice(4);
@@ -592,7 +641,7 @@ async function renderNotes() {
   try {
     const list = NOTES = await (await api('/api/tasks/notes?id=' + encodeURIComponent(id))).json();
     const t = BYID[id], main = t && !t.parent && t.status !== 'Хийсэн';   // main ажлын тэмдэглэлийг sub ажил болгож болно
-    box.innerHTML = (list.length ? list.map((n, i) => `<div class="nt" style="display:flex;gap:6px"><div style="flex:1"><time>${esc(n.date.slice(5))} ${esc(n.time)}</time>${esc(n.text)}</div>${main
+    box.innerHTML = (list.length ? list.map((n, i) => `<div class="nt" style="display:flex;gap:6px"><div style="flex:1"><time>${esc(n.date.slice(5))} ${esc(n.time)}${ME.login ? ' · ' + esc(nameOf(n.who)) : ''}</time>${esc(n.text)}</div>${main
         ? `<button class="cnt" style="border:0;align-self:start" onclick="toSubs('${esc(id)}', NOTES[${i}].text, this)">↳ Sub</button>` : ''}</div>`).join('')
       : '<p class="muted" style="margin:0">Тэмдэглэл алга.</p>') +
       `<textarea rows="3" placeholder="Өнөөдөр юу болсон бэ..."></textarea>
@@ -729,7 +778,12 @@ function searchActs() {
 }
 
 addItem();
-show('tasks');   // нүүр таб — Ажлууд
+(async () => {
+  try { ME = await (await api('/api/me')).json(); } catch { return; }   // нэвтрээгүй бол login цонх гарсан
+  $('#sheetLink').hidden = !ME.admin;
+  if (ME.login) $('#who').innerHTML = ` · ${esc(ME.name)} · <a href="#" onclick="logout();return false" style="color:var(--accent);text-decoration:none">Гарах</a>`;
+  show('tasks');   // нүүр таб — Ажлууд
+})();
 </script>
 </body>
 </html>

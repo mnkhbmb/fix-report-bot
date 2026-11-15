@@ -55,7 +55,7 @@ async def main():
         tid = (await (await c.post("/api/tasks", json={"text": "Дархан руу PC бэлдэх"}, headers=H)).json())["id"]
         sub = (await (await c.post("/api/tasks", json={"text": "SSD шалгах", "parent": tid}, headers=H)).json())["id"]
         assert (await c.post("/api/tasks", json={"text": "x", "parent": sub}, headers=H)).status == 400   # sub-ийн sub болохгүй
-        assert (await c.post("/api/tasks", json={"text": "x", "parent": "T-9999"}, headers=H)).status == 400
+        assert (await c.post("/api/tasks", json={"text": "x", "parent": "T-9999"}, headers=H)).status == 404
         # main-ийг өөр main-ийн sub болгох / буцаах
         mv = lambda i, p: c.post("/api/tasks/move", json={"id": i, "parent": p}, headers=H)
         other = (await (await c.post("/api/tasks", json={"text": "Kiosk авах"}, headers=H)).json())["id"]
@@ -87,7 +87,7 @@ async def main():
         tt = lambda i, x: c.post("/api/tasks/move", json={"id": i, "tag": x}, headers=H)
         assert (await tt(vm, "Lof")).status == 200 and tg()[vs] == "Lof"
         assert (await tt(vs, "-")).status == 200 and tg()[vs] == ""
-        assert (await tt("T-9999", "Lof")).status == 400
+        assert (await tt("T-9999", "Lof")).status == 404
         # 📝 ажлын тэмдэглэл
         nt = lambda i, x: c.post("/api/tasks/notes", json={"id": i, "text": x}, headers=H)
         assert (await nt(vm, "Утсаар ярьсан, маргааш уулзана")).status == 200
@@ -144,7 +144,10 @@ async def main():
     acts = []
     tid = assistant.run_tool(s, "add_task", {"text": "Гаражийн камер"}, acts).split(": ")[1]
     assert any(t["id"] == tid for t in json.loads(assistant.run_tool(s, "list_tasks", {}, acts)))
-    assert assistant.run_tool(s, "finish_task", {"id": "T-9999"}, acts) == "Ажил олдсонгүй"
+    try:
+        assistant.run_tool(s, "finish_task", {"id": "T-9999"}, acts); assert False
+    except ValueError:
+        pass
     assistant.run_tool(s, "add_log", {"text": "Viot уулзалт", "date": "2026-11-12"}, acts)
     assert json.loads(assistant.run_tool(s, "get_log", {"start": "2026-11-12", "end": "2026-11-12"}, acts))[0]["tag"] == "Viot"
     # бичлэгийг өөр tag руу шилжүүлэх
@@ -170,7 +173,72 @@ async def main():
         assistant.run_tool(s, "add_log", {"text": "x", "date": "13/11"}, acts); assert False
     except ValueError:
         pass
+    await multi_user()
     print("ok — test_act.pdf, test_report.pdf")
+
+
+async def multi_user():
+    """👥 Google нэвтрэлт (verify хуурамч) + хувийн / багийн ялгаа."""
+    import assistant
+    sh.USERS.update({"a@x.mn": "Ану", "b@x.mn": "Бат"})
+    sh.ADMIN = web.ADMIN = "a@x.mn"
+    web.CLIENT_ID = "cid"
+
+    async def fake_verify(token):
+        return token
+    web.verify_google = fake_verify
+    s = MemSheets()
+    async with TestClient(TestServer(web.make_app(s))) as c:
+        assert (await c.get("/api/tasks")).status == 401
+        assert (await c.post("/auth/google", json={"credential": "z@x.mn"})).status == 403   # жагсаалтад алга
+        r = await c.post("/auth/google", json={"credential": "a@x.mn"})
+        assert r.status == 200 and web.read_session(r.cookies["s"].value) == "a@x.mn"
+        c.session.cookie_jar.clear()
+        A = {"Cookie": "s=" + web.sign_session("a@x.mn")}
+        B = {"Cookie": "s=" + web.sign_session("b@x.mn")}
+        assert (await c.get("/api/tasks", headers={"Cookie": "s=" + web.sign_session("a@x.mn", -1)})).status == 401
+        assert (await c.get("/api/tasks", headers={"Cookie": "s=" + web.sign_session("a@x.mn")[:-1] + "0"})).status == 401
+        me = await (await c.get("/api/me", headers=A)).json()
+        assert me["name"] == "Ану" and me["admin"] and me["login"]
+
+        add = lambda h, **kw: c.post("/api/tasks", json=kw, headers=h)
+        pa = (await (await add(A, text="Анугийн хувийн")).json())["id"]
+        tb = (await (await add(B, text="Багийн ажил", team=True)).json())["id"]
+        ids = lambda h: c.get("/api/tasks", headers=h)
+        assert {t["id"] for t in await (await ids(A)).json()} == {pa, tb}
+        assert {t["id"] for t in await (await ids(B)).json()} == {tb}
+        # Бат Анугийн хувийн ажилд хүрч чадахгүй
+        assert (await c.post("/api/tasks/done", json={"id": pa}, headers=B)).status == 404
+        assert (await add(B, text="x", parent=pa)).status == 404
+        assert (await c.get(f"/api/tasks/notes?id={pa}", headers=B)).status == 404
+        # багийн ажлын sub нь багийнх; Ану дуусгахад багийн тайланд Ану гэж орно
+        sb = (await (await add(A, text="Sub", parent=tb)).json())["id"]
+        assert {t["id"] for t in await (await ids(B)).json()} == {tb, sb}
+        assert (await c.post("/api/tasks/done", json={"id": sb}, headers=A)).status == 200
+        e = s.get_log("0000", "9999")[-1]
+        assert (e["who"], e["team"]) == ("a@x.mn", "1")
+        await c.post("/api/log", json={"text": "Бат хувийн бичлэг"}, headers=B)
+        lg = lambda h, sc: c.get(f"/api/log?from=2000-01-01&to=2100-01-01&scope={sc}", headers=h)
+        assert [x["text"] for x in await (await lg(B, "team")).json()] == [e["text"]]
+        assert [x["text"] for x in await (await lg(B, "me")).json()] == ["Бат хувийн бичлэг"]
+        assert [x["text"] for x in await (await lg(A, "me")).json()] == [e["text"]]
+        # Ану Батын хувийн бичлэгийн tag-ийг өөрчилж чадахгүй, багийнхыг чадна
+        bp = s.get_log("0000", "9999")[-1]
+        assert (await c.post("/api/log/tag", json={"row": bp["row"], "text": bp["text"], "tag": "Lof"}, headers=A)).status == 400
+        assert (await c.post("/api/log/tag", json={"row": e["row"], "text": e["text"], "tag": "Lof"}, headers=B)).status == 200
+        # хувийн ажлыг баг руу шилжүүлэх
+        assert (await c.post("/api/tasks/move", json={"id": pa, "team": "1"}, headers=A)).status == 200
+        assert pa in {t["id"] for t in await (await ids(B)).json()}
+        r = await c.get("/api/report.pdf?month=2026-11&scope=team", headers=B)
+        assert r.status == 200
+    # туслах: Бат Анугийн хувийн ажлыг жагсаалтаас харахгүй
+    pb = s.add_task("Анугийн нууц", owner="a@x.mn")
+    assert pb not in assistant.run_tool(s, "list_tasks", {}, [], "b@x.mn")
+    try:
+        assistant.run_tool(s, "finish_task", {"id": pb}, [], "b@x.mn"); assert False
+    except ValueError:
+        pass
+    web.CLIENT_ID = ""
 
 if __name__ == "__main__":
     asyncio.run(main())

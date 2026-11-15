@@ -59,7 +59,7 @@ ACT_HEADERS = [
     "Зүйл", "Тоо", "Серийн дугаар", "Тэмдэглэл", "Discord"
 ]
 TAB_LOG = "Тайлан"     # өдөр тутмын хийсэн ажил
-LOG_HEADERS = ["Огноо", "Цаг", "Бичлэг", "Tag", "Эх"]   # Эх = нэгтгэсэн эх бичлэгийн текст
+LOG_HEADERS = ["Огноо", "Цаг", "Бичлэг", "Tag", "Эх", "Хэн", "Баг"]   # Эх = нэгтгэсэн эх бичлэгийн текст, Хэн = имэйл, Баг = "1"
 # ponytail: tag нэр текстэд байвал автомат (жш "Lof 4 орсон" → Lof). LOG_TAGS env-ээр өөрчилнө
 TAGS = [t.strip() for t in os.environ.get("LOG_TAGS", "Lof,Viot").split(",") if t.strip()]
 
@@ -69,8 +69,17 @@ def auto_tag(text: str) -> str:
     return next((t for t in TAGS if t.lower() in low), "")
 TAB_TASK = "Ажлууд"    # хийх ажлын жагсаалт
 TAB_NOTE = "Ажлын тэмдэглэл"   # ажил дээр өдөр өдрөөр юу болсныг чөлөөтэй бичнэ
-NOTE_HEADERS = ["Ажил ID", "Огноо", "Цаг", "Бичлэг"]
-TASK_HEADERS = ["ID", "Ажил", "Төлөв", "Нэмсэн", "Дууссан", "Тэмдэглэл", "Эх", "Зураг", "Tag", "Яаралтай", "Дуусах"]   # Яаралтай = "1", Дуусах = YYYY-MM-DD
+NOTE_HEADERS = ["Ажил ID", "Огноо", "Цаг", "Бичлэг", "Хэн"]
+# Хэрэглэгчид: USERS="a@gmail.com=Мөнхбямба,b@gmail.com=Бат". Эхнийх нь админ — эзэнгүй хуучин мөрүүд түүнийх.
+USERS = {e.strip().lower(): n.strip() for e, _, n in
+         (u.partition("=") for u in os.environ.get("USERS", "").split(",")) if e.strip()}
+ADMIN = next(iter(USERS), "")
+
+
+def can_see(t: dict, me: str) -> bool:
+    """Багийн ажил бүгдэд, хувийн ажил зөвхөн эзэндээ."""
+    return t["team"] == "1" or t["owner"] == me
+TASK_HEADERS = ["ID", "Ажил", "Төлөв", "Нэмсэн", "Дууссан", "Тэмдэглэл", "Эх", "Зураг", "Tag", "Яаралтай", "Дуусах", "Эзэн", "Баг"]   # Яаралтай = "1", Дуусах = YYYY-MM-DD
 # Эх = main ажлын ID (sub бол), Зураг = файлын нэрс таслалаар
 # Тооцоо нь салбар бүрт тусдаа tab үүснэ: "Тооцоо-{branch}"
 TOO_PREFIX = "Тооцоо-"
@@ -603,11 +612,11 @@ class SheetsClient:
 
     # ── Тайлан / Ажлууд ───────────────────────────────────────────────────────
 
-    def add_log(self, text: str, date: str = "", tag: str = ""):
+    def add_log(self, text: str, date: str = "", tag: str = "", who: str = "", team: str = ""):
         """date='2026-11-13' → өнгөрсөн өдөрт нөхөж бичнэ (цаг хоосон). tag хоосон бол уншихдаа автомат."""
         now = datetime.now()
         row = [date, ""] if date else [now.strftime("%Y-%m-%d"), now.strftime("%H:%M")]
-        self._append_row(TAB_LOG, row + [text, tag])
+        self._append_row(TAB_LOG, row + [text, tag, "", who, team])
 
     def get_log(self, start: str, end: str, tag: str = "") -> list[dict]:
         """start..end (YYYY-MM-DD, хоёулаа орно) хоорондох бичлэгүүд. tag өгвөл шүүнэ."""
@@ -617,48 +626,64 @@ class SheetsClient:
             t = _safe(r, 3) or auto_tag(text)
             t = "" if t == "-" else t   # "-" = гараар tag-гүй болгосон
             if start <= d <= end and (not tag or t.lower() == tag.lower()):
-                out.append({"row": n, "date": d, "time": _safe(r, 1), "text": text, "tag": t, "parent": _safe(r, 4)})
+                out.append({"row": n, "date": d, "time": _safe(r, 1), "text": text, "tag": t, "parent": _safe(r, 4),
+                            "who": _safe(r, 5) or ADMIN, "team": _safe(r, 6)})
         return out
 
-    def set_log_tag(self, row: int, text: str, tag: str):
+    def set_log_tag(self, row: int, text: str, tag: str, me: Optional[str] = None):
         """Бичлэгийн tag-ийг солино. text-ээр мөрийг давхар шалгана (мөр шилжсэн бол буруу мөрөнд бичихгүй).
         tag='' → автомат, '-' → tag-гүй."""
         # ponytail: мөрийн дугаараар хаяглана — Тайлан табаас мөр устгавал хуучин дугаар буруудна, text шалгалт хамгаална
-        self._set_log_cell(row, text, "D", tag)
+        self._set_log_cell(row, text, "D", tag, me)
 
-    def set_log_parent(self, row: int, text: str, parent: str):
+    def set_log_parent(self, row: int, text: str, parent: str, me: Optional[str] = None):
         """Бичлэгийг нэг өдрийн өөр бичлэгийн доор оруулна. parent = эх бичлэгийн текст ('' → салгана)."""
-        self._set_log_cell(row, text, "E", parent)
+        self._set_log_cell(row, text, "E", parent, me)
 
-    def _set_log_cell(self, row: int, text: str, col: str, value: str):
+    def _set_log_cell(self, row: int, text: str, col: str, value: str, me: Optional[str] = None):
+        """me өгвөл: зөвхөн өөрийн эсвэл багийн бичлэгийг өөрчилнө."""
         rows = self._get_rows(TAB_LOG)
-        if not (2 <= row <= len(rows)) or _safe(rows[row - 1], 2) != text:
+        r = rows[row - 1] if 2 <= row <= len(rows) else []
+        if _safe(r, 2) != text or (me is not None and _safe(r, 6) != "1" and (_safe(r, 5) or ADMIN) != me):
             raise ValueError("Бичлэг олдсонгүй — хуудсаа шинэчилнэ үү")
         self._update_cell(TAB_LOG, row, col, value)
 
-    def add_task(self, text: str, parent: str = "", tag: str = "", urgent: str = "", due: str = "") -> str:
+    def add_task(self, text: str, parent: str = "", tag: str = "", urgent: str = "", due: str = "",
+                 owner: str = "", team: str = "") -> str:
         """parent өгвөл sub ажил — parent нь байгаа main ажил байх ёстой."""
         _check_date(due)
         if parent and not any(t["id"] == parent and not t["parent"] for t in self.get_tasks()):
             raise ValueError("Main ажил олдсонгүй")
         tid = self._next_id(TAB_TASK, "T")
-        self._append_row(TAB_TASK, [tid, text, "Хийх", _now(), "", "", parent, "", tag, urgent and "1", due])
+        self._append_row(TAB_TASK, [tid, text, "Хийх", _now(), "", "", parent, "", tag, urgent and "1", due, owner, team])
         return tid
 
     def get_tasks(self) -> list[dict]:
-        """tag: гараар тавьсан → текстээс автомат → main-аасаа өвлөнө ("-" = tag-гүй)."""
-        keys = ["id", "text", "status", "created", "done", "note", "parent", "photos", "tag", "urgent", "due"]
-        tasks = [dict(zip(keys, [_safe(r, i) for i in range(11)]))
+        """tag: гараар тавьсан → текстээс автомат → main-аасаа өвлөнө ("-" = tag-гүй).
+        owner/team: sub нь main-аасаа өвлөнө; эзэнгүй хуучин мөр → ADMIN."""
+        keys = ["id", "text", "status", "created", "done", "note", "parent", "photos", "tag", "urgent", "due", "owner", "team"]
+        tasks = [dict(zip(keys, [_safe(r, i) for i in range(13)]))
                  for r in self._get_rows(TAB_TASK)[1:] if _safe(r, 0)]
         own = {t["id"]: t["tag"] or auto_tag(t["text"]) for t in tasks}
         for t in tasks:
             tag = own[t["id"]] or own.get(t["parent"], "")
             t["tag"] = "" if tag == "-" else tag
+        byid = {t["id"]: t for t in tasks}
+        for t in tasks:
+            src = byid.get(t["parent"], t)
+            t["owner"], t["team"] = src["owner"] or ADMIN, src["team"]
         return tasks
 
+    def task_for(self, tid: str, me: str) -> dict:
+        """me харж чадах ажлыг буцаана, эс бөгөөс ValueError (бусдын хувийн ажлыг "олдсонгүй" гэнэ)."""
+        t = next((t for t in self.get_tasks() if t["id"] == tid), None)
+        if t is None or not can_see(t, me):
+            raise ValueError("Ажил олдсонгүй")
+        return t
+
     def set_task(self, tid: str, field: str, value: str):
-        """field: tag ('' → автомат, '-' → tag-гүй) | urgent ('1'/'') | due (YYYY-MM-DD / '')."""
-        col = {"tag": "I", "urgent": "J", "due": "K"}[field]
+        """field: tag ('' → автомат, '-' → tag-гүй) | urgent ('1'/'') | due (YYYY-MM-DD / '') | team ('1'/'')."""
+        col = {"tag": "I", "urgent": "J", "due": "K", "team": "M"}[field]
         if field == "due":
             _check_date(value)
         row = self._find_row(TAB_TASK, 0, tid)
@@ -687,17 +712,17 @@ class SheetsClient:
                     self._update_cell(TAB_TASK, self._find_row(TAB_TASK, 0, t["id"]), "G", parent)
         self._update_cell(TAB_TASK, self._find_row(TAB_TASK, 0, tid), "G", parent)
 
-    def add_task_note(self, tid: str, text: str):
+    def add_task_note(self, tid: str, text: str, who: str = ""):
         if self._find_row(TAB_TASK, 0, tid) is None:
             raise ValueError("Ажил олдсонгүй")
         now = datetime.now()
-        self._append_row(TAB_NOTE, [tid, now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), text])
+        self._append_row(TAB_NOTE, [tid, now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), text, who])
 
     def get_task_notes(self, tid: str) -> list[dict]:
-        return [{"date": _safe(r, 1), "time": _safe(r, 2), "text": _safe(r, 3)}
+        return [{"date": _safe(r, 1), "time": _safe(r, 2), "text": _safe(r, 3), "who": _safe(r, 4) or ADMIN}
                 for r in self._get_rows(TAB_NOTE)[1:] if _safe(r, 0) == tid]
 
-    def finish_task(self, tid: str, note: str) -> Optional[str]:
+    def finish_task(self, tid: str, note: str, who: str = "") -> Optional[str]:
         """Ажлыг дуусгаж, тайланд бичнэ ("Main › Sub" хэлбэрээр). Ажлын текстийг буцаана."""
         tasks = {t["id"]: t for t in self.get_tasks()}
         row = self._find_row(TAB_TASK, 0, tid)
@@ -707,7 +732,7 @@ class SheetsClient:
         self._update_row(TAB_TASK, row, [tid, t["text"], "Хийсэн", t["created"], _now(), note, t["parent"]])
         main = tasks.get(t["parent"])
         name = f"{main['text']} › {t['text']}" if main else t["text"]
-        self.add_log(f"Дууссан: {name}" + (f" — {note}" if note else ""), tag=t["tag"])
+        self.add_log(f"Дууссан: {name}" + (f" — {note}" if note else ""), tag=t["tag"], who=who, team=t["team"])
         return t["text"]
 
     # ── Тооцоо / Хаалт ─────────────────────────────────────────────────────────
