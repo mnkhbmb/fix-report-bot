@@ -14,7 +14,7 @@ import os
 import re
 import time
 from dotenv import load_dotenv
-from sheets import SheetsClient
+from sheets import SheetsClient, db
 
 # Локал дээр .env-ийг автоматаар олж уншина; Railway дээр жинхэнэ env var ашиглана.
 load_dotenv()
@@ -129,7 +129,7 @@ async def shipment_cmd(interaction: discord.Interaction, items: str, notes: str 
         return await interaction.followup.send(
             "❌ Формат буруу. Жишээ: `1 mouse, 2 keyboard, 10 чихэвч`", ephemeral=True)
 
-    shp_id, rep_rows = client.sheets.create_shipment(
+    shp_id, rep_rows = await db(client.sheets.create_shipment,
         branch=branch, items=parsed,
         reported_by=str(interaction.user), notes=notes
     )
@@ -159,7 +159,7 @@ async def received_cmd(interaction: discord.Interaction, shp_id: str):
 
     await interaction.response.defer()
 
-    result = client.sheets.mark_received(shp_id.upper(), received_by=str(interaction.user))
+    result = await db(client.sheets.mark_received, shp_id.upper(), received_by=str(interaction.user))
     if result is None:
         return await interaction.followup.send(f"❌ **{shp_id}** ID олдсонгүй.", ephemeral=True)
 
@@ -191,7 +191,7 @@ async def fix_cmd(interaction: discord.Interaction, rep_id: str, notes: str = ""
 
     await interaction.response.defer()
 
-    result = client.sheets.mark_fixed(
+    result = await db(client.sheets.mark_fixed,
         rep_id=rep_id.upper(), fixed_by=str(interaction.user), notes=notes)
 
     if result is None:
@@ -236,7 +236,7 @@ async def return_cmd(interaction: discord.Interaction, rep_id: str):
             "❌ Энэ командыг **салбарын суваг** дотор ашиглана уу.", ephemeral=True)
 
     await interaction.response.defer()
-    result = client.sheets.mark_returned(rep_id.upper(), returned_by=str(interaction.user))
+    result = await db(client.sheets.mark_returned, rep_id.upper(), returned_by=str(interaction.user))
 
     if result is None:
         return await interaction.followup.send(
@@ -272,7 +272,7 @@ async def status_cmd(interaction: discord.Interaction, id: str):
     id_upper = id.strip().upper()
 
     if id_upper.startswith("SHP-"):
-        result = client.sheets.get_shipment_status(id_upper)
+        result = await db(client.sheets.get_shipment_status, id_upper)
         if result is None:
             return await interaction.followup.send(f"❌ **{id_upper}** олдсонгүй.", ephemeral=True)
 
@@ -296,7 +296,7 @@ async def status_cmd(interaction: discord.Interaction, id: str):
             embed.add_field(name="✅ Дууссан", value=lines, inline=False)
 
     elif id_upper.startswith("REP-"):
-        result = client.sheets.get_repair_status(id_upper)
+        result = await db(client.sheets.get_repair_status, id_upper)
         if result is None:
             return await interaction.followup.send(f"❌ **{id_upper}** олдсонгүй.", ephemeral=True)
 
@@ -337,7 +337,7 @@ async def status_cmd(interaction: discord.Interaction, id: str):
 async def aguulakh_cmd(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     branch = interaction.channel.name
-    items = client.sheets.get_aguulakh(branch)
+    items = await db(client.sheets.get_aguulakh, branch)
 
     embed = discord.Embed(
         title=f"📦 Агуулах — {branch}",
@@ -365,7 +365,7 @@ async def aguulakh_cmd(interaction: discord.Interaction):
 async def stock_add_cmd(interaction: discord.Interaction, item: str, qty: int, notes: str = ""):
     await interaction.response.defer()
     branch = interaction.channel.name
-    result = client.sheets.adjust_stock(branch, item, qty, notes)
+    result = await db(client.sheets.adjust_stock, branch, item, qty, notes)
 
     action = "нэмэгдэв" if qty >= 0 else "хасагдав"
     embed = discord.Embed(
@@ -395,7 +395,7 @@ async def swap_cmd(interaction: discord.Interaction, item: str, qty: int, reason
         return await interaction.followup.send("❌ Тоо эерэг байх ёстой.", ephemeral=True)
 
     branch = interaction.channel.name
-    result = client.sheets.record_swap(branch, item, qty, reason, str(interaction.user))
+    result = await db(client.sheets.record_swap, branch, item, qty, reason, str(interaction.user))
 
     embed = discord.Embed(
         title="🔄 Зүйл солилоо",
@@ -462,7 +462,7 @@ class HaaltModal(ui.Modal, title="🧮 Ээлжийн хаалт"):
         zardal_n = _parse_int(self.zardal.value)
         qpay_n   = _parse_int(self.qpay.value)
 
-        result = client.sheets.add_haalt(
+        result = await db(client.sheets.add_haalt,
             branch=self.branch, shift=self.shift,
             worker=self.worker.strip(),
             cash=cash_n, zardal=zardal_n, qpay=qpay_n, kart=kart_n,

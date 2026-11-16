@@ -143,10 +143,10 @@ def _safe(row: list, idx: int) -> str:
 # (ID, мөрийн дугаар) зэрэг явбал эвдэрнэ. Хурдан дараалан дарахад 500 гарч байсныг засна.
 LOCK = threading.Lock()
 
-async def db(fn, *a):
+async def db(fn, *a, **kw):
     def run():
         with LOCK:
-            return fn(*a)
+            return fn(*a, **kw)
     return await asyncio.to_thread(run)
 
 

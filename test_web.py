@@ -37,7 +37,7 @@ async def main():
         assert (await c.get("/api/tasks")).status == 401             # API PIN-тэй
         H = {"X-PIN": "1234"}
 
-        assert (await c.post("/api/log", json={"text": "Lof 4 тог баригч солисон"}, headers=H)).status == 200
+        assert (await c.post("/api/log", json={"text": "Lof 4 тог баригч солисон", "date": "2026-11-14"}, headers=H)).status == 200
         assert (await c.post("/api/log", json={"text": "a\n\nb", "date": "2026-11-13"}, headers=H)).status == 200
         assert [e["text"] for e in s.log if e["date"] == "2026-11-13"] == ["a", "b"]
         assert (await c.post("/api/log", json={"text": "x", "date": "13/11"}, headers=H)).status == 400
